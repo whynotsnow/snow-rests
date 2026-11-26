@@ -1,0 +1,1090 @@
+name: snow build CI
+run-name: snow build CI · mode=${{ inputs.mode || 'validation' }} · request=${{ inputs.request_id || github.run_id }}
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    schedule:
+        - cron: "0 18 * * 0"
+    workflow_dispatch:
+        inputs:
+            mode:
+                description: Admin path is candidate or selected-artifact; legacy-break-glass requires explicit opt-in
+                required: false
+                default: candidate
+                type: choice
+                options:
+                    - candidate
+                    - selected-artifact
+                    - legacy-break-glass
+            project_slug:
+                description: Deployment project slug
+                required: false
+                default: blog
+                type: string
+            target:
+                description: Deployment target
+                required: false
+                default: site
+                type: string
+            commit_sha:
+                description: Exact source commit for a selected artifact
+                required: false
+                type: string
+            artifact_id:
+                description: snow-base artifact id for selected-artifact deployment
+                required: false
+                type: string
+            artifact_digest:
+                description: Expected sha256 digest for selected-artifact deployment
+                required: false
+                type: string
+            artifact_run_id:
+                description: GitHub Actions run id containing the artifact
+                required: false
+                type: string
+            artifact_github_id:
+                description: GitHub Actions artifact id
+                required: false
+                type: string
+            artifact_name:
+                description: GitHub Actions artifact name
+                required: false
+                type: string
+            request_id:
+                description: snow-base deployment request id
+                required: false
+                type: string
+            change_summary:
+                description: Frozen deployment change summary supplied by snow-base Admin
+                required: false
+                type: string
+            validation_summary:
+                description: Validation summary supplied by snow-base Admin
+                required: false
+                type: string
+            break_glass_reason:
+                description: Required justification when mode is legacy-break-glass
+                required: false
+                type: string
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && 'production' || 'validation' }}
+    cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+permissions:
+    contents: read
+    actions: read
+
+env:
+    ENABLE_CONTENT_SYNC: "false"
+    LC_ALL: C
+
+jobs:
+    plan:
+        name: Validation Plan
+        runs-on: ubuntu-latest
+        outputs:
+            groups: ${{ steps.plan.outputs.groups }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Select validation groups
+              id: plan
+              env:
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+                  BEFORE_SHA: ${{ github.event.before }}
+                  EVENT_NAME: ${{ github.event_name }}
+              run: |
+                  node scripts/test-impact.mjs --check-coverage
+                  case "$EVENT_NAME" in
+                    pull_request)
+                      node scripts/test-impact.mjs --mode=ci --base "$BASE_SHA" --json > test-plan.json
+                      ;;
+                    push)
+                      if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" =~ ^0+$ ]]; then
+                        echo '{"groups":["full"],"files":[],"unmatched":[],"commands":[]}' > test-plan.json
+                      else
+                        node scripts/test-impact.mjs --mode=ci --base "$BEFORE_SHA" --json > test-plan.json
+                      fi
+                      ;;
+                    *)
+                      echo '{"groups":["full"],"files":[],"unmatched":[],"commands":[]}' > test-plan.json
+                      ;;
+                  esac
+                  cat test-plan.json
+                  SELECTED_GROUPS=$(node -e 'const fs=require("node:fs");const plan=JSON.parse(fs.readFileSync("test-plan.json","utf8"));process.stdout.write(JSON.stringify(plan.groups))')
+                  echo "groups=$SELECTED_GROUPS" >> "$GITHUB_OUTPUT"
+
+    quality:
+        name: Quality Checks
+        needs: plan
+        if: >-
+            contains(needs.plan.outputs.groups, '"full"') ||
+            contains(needs.plan.outputs.groups, '"workspace"') ||
+            contains(needs.plan.outputs.groups, '"markdown"') ||
+            contains(needs.plan.outputs.groups, '"lint"') ||
+            contains(needs.plan.outputs.groups, '"type"') ||
+            contains(needs.plan.outputs.groups, '"declaration-type"') ||
+            contains(needs.plan.outputs.groups, '"test-type"') ||
+            contains(needs.plan.outputs.groups, '"astro"') ||
+            contains(needs.plan.outputs.groups, '"design"')
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Enable pnpm
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.22.0 --activate
+            - run: pnpm install --frozen-lockfile
+            - name: Validate Agent Workspace
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"workspace"')
+              run: node .agent-workspace/tools/agent-workspace.mjs validate
+            - name: Lint Markdown
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"markdown"')
+              run: pnpm lint:md
+            - name: Run ESLint
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"lint"')
+              run: pnpm lint
+            - name: Check Design System boundaries
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"design"')
+              run: pnpm design:check
+            - name: Run Astro Check
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"astro"')
+              run: pnpm check
+            - name: Run source TypeScript Check
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"type"')
+              run: pnpm type-check
+            - name: Run declaration TypeScript Check
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"declaration-type"')
+              run: pnpm type-check:declarations
+            - name: Run test TypeScript Check
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"test-type"')
+              run: pnpm type-check:tests
+
+    fast-tests:
+        name: Fast Tests
+        needs: plan
+        if: >-
+            contains(needs.plan.outputs.groups, '"full"') ||
+            contains(needs.plan.outputs.groups, '"unit"') ||
+            contains(needs.plan.outputs.groups, '"integration"')
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Enable pnpm
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.22.0 --activate
+            - run: pnpm install --frozen-lockfile
+            - name: Install Playwright Chromium
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"integration"')
+              run: pnpm exec playwright install --with-deps chromium
+            - name: Run all fast tests
+              if: contains(needs.plan.outputs.groups, '"full"')
+              run: pnpm test:fast
+            - name: Run Unit tests
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"unit"') }}
+              run: pnpm test:unit
+            - name: Run Integration tests
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"integration"') }}
+              run: pnpm test:integration
+
+    browser-tests:
+        name: Browser Tests
+        needs: plan
+        if: >-
+            contains(needs.plan.outputs.groups, '"full"') ||
+            contains(needs.plan.outputs.groups, '"smoke"') ||
+            contains(needs.plan.outputs.groups, '"shell"') ||
+            contains(needs.plan.outputs.groups, '"home"') ||
+            contains(needs.plan.outputs.groups, '"page-support"') ||
+            contains(needs.plan.outputs.groups, '"post-list"') ||
+            contains(needs.plan.outputs.groups, '"post-detail"') ||
+            contains(needs.plan.outputs.groups, '"site-notice"') ||
+            contains(needs.plan.outputs.groups, '"activity-center"') ||
+            contains(needs.plan.outputs.groups, '"floating-tools"') ||
+            contains(needs.plan.outputs.groups, '"design-contract"')
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Enable pnpm
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.22.0 --activate
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm exec playwright install --with-deps chromium
+            - name: Run full browser regression
+              if: contains(needs.plan.outputs.groups, '"full"')
+              run: pnpm test:e2e:full
+            - name: Run Smoke suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"smoke"') }}
+              run: pnpm test:e2e:smoke
+            - name: Run Shell suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"shell"') }}
+              run: pnpm test:e2e:shell
+            - name: Run Home suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"home"') }}
+              run: pnpm exec playwright test tests/e2e/features/home.spec.ts
+            - name: Run Page Support suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"page-support"') }}
+              run: pnpm exec playwright test tests/e2e/features/page-support.spec.ts
+            - name: Run Post List suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"post-list"') }}
+              run: pnpm exec playwright test tests/e2e/features/post-list.spec.ts
+            - name: Run Post Detail suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"post-detail"') }}
+              run: pnpm exec playwright test tests/e2e/features/post-detail.spec.ts
+            - name: Run Site Notice suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"site-notice"') }}
+              run: pnpm exec playwright test tests/e2e/features/site-notice.spec.ts
+            - name: Run Activity Center suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"activity-center"') }}
+              run: pnpm exec playwright test tests/e2e/features/activity-center.spec.ts
+            - name: Run Floating Tools suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"floating-tools"') }}
+              run: pnpm exec playwright test tests/e2e/features/floating-tools.spec.ts
+            - name: Run Design contract suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"design-contract"') }}
+              run: pnpm exec playwright test tests/e2e/contracts/design-system.spec.ts
+
+    build:
+        name: Astro Build
+        needs: plan
+        if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"astro-build"')
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Enable pnpm
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.22.0 --activate
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm exec playwright install --with-deps chromium
+            - name: Run complete production build
+              if: contains(needs.plan.outputs.groups, '"full"')
+              run: pnpm build
+            - name: Run Astro build stage
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') }}
+              run: pnpm build:astro
+
+    ci-summary:
+        name: CI Summary
+        needs:
+            - plan
+            - quality
+            - fast-tests
+            - browser-tests
+            - build
+        if: always()
+        runs-on: ubuntu-latest
+        steps:
+            - name: Verify selected validation jobs
+              env:
+                  PLAN_RESULT: ${{ needs.plan.result }}
+                  QUALITY_RESULT: ${{ needs.quality.result }}
+                  FAST_TESTS_RESULT: ${{ needs.fast-tests.result }}
+                  BROWSER_TESTS_RESULT: ${{ needs.browser-tests.result }}
+                  BUILD_RESULT: ${{ needs.build.result }}
+              run: |
+                  failed=0
+                  for name in PLAN QUALITY FAST_TESTS BROWSER_TESTS BUILD; do
+                    result_var="${name}_RESULT"
+                    result="${!result_var}"
+                    echo "$name result: $result"
+                    case "$result" in
+                      success|skipped)
+                        ;;
+                      *)
+                        failed=1
+                        ;;
+                    esac
+                  done
+                  if [ "$failed" -ne 0 ]; then
+                    echo "One or more selected validation jobs failed, were cancelled, or did not complete."
+                    exit 1
+                  fi
+
+    build-vercel-artifact:
+        name: Build Vercel Artifact
+        needs: ci-summary
+        if: >-
+            github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode != 'selected-artifact'
+        runs-on: ubuntu-latest
+        environment: production
+        outputs:
+            artifact-digest: ${{ steps.digest.outputs.artifact-digest }}
+            archive-digest: ${{ steps.archive-roundtrip.outputs.archive-digest }}
+            archive-size: ${{ steps.archive-roundtrip.outputs.archive-size }}
+            artifact-name: ${{ steps.artifact-meta.outputs.artifact-name }}
+            artifact-id: ${{ steps.upload.outputs.artifact-id }}
+            artifact-url: ${{ steps.upload.outputs.artifact-url }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Verify origin main commit
+              run: |
+                  git fetch origin main --depth=1
+                  MAIN_SHA="$(git rev-parse origin/main)"
+                  if [ "$GITHUB_SHA" != "$MAIN_SHA" ]; then
+                    echo "Production artifact build must run from origin/main."
+                    echo "Current commit: $GITHUB_SHA"
+                    echo "origin/main: $MAIN_SHA"
+                    exit 1
+                  fi
+
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+
+            - name: Enable pnpm
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.22.0 --activate
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Validate build secrets
+              env:
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+              run: |
+                  missing=0
+                  for name in VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_TOKEN; do
+                    if [ -z "${!name}" ]; then
+                      echo "Missing required production environment secret: $name"
+                      missing=1
+                    fi
+                  done
+                  if [ "$missing" -ne 0 ]; then
+                    exit 1
+                  fi
+
+            - name: Pull Vercel production settings
+              env:
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+              run: pnpm dlx vercel@latest pull --yes --environment=production --token "$VERCEL_TOKEN"
+
+            - name: Install Playwright Chromium
+              run: pnpm exec playwright install --with-deps chromium
+
+            - name: Build Vercel output
+              env:
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+              run: pnpm dlx vercel@latest build --prod --yes --token "$VERCEL_TOKEN"
+
+            - name: Create canonical Vercel archive
+              id: archive
+              run: node scripts/create-vercel-archive.mjs .vercel/output vercel-output.tar.gz vercel-output-metadata.json
+
+            - name: Prepare artifact metadata
+              id: artifact-meta
+              run: |
+                  artifact_name="vercel-output-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+                  echo "artifact-name=${artifact_name}" >> "$GITHUB_OUTPUT"
+                  echo "GitHub artifact name: ${artifact_name}"
+
+            - name: Upload Vercel artifact
+              id: upload
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ steps.artifact-meta.outputs.artifact-name }}
+                  path: |
+                      .vercel/output/**
+                      vercel-output.tar.gz
+                      vercel-output-metadata.json
+                  if-no-files-found: error
+                  include-hidden-files: true
+                  compression-level: 0
+                  retention-days: 7
+
+            - name: Clear pre-upload output before round-trip
+              run: rm -rf .vercel/output
+
+            - name: Re-download uploaded artifact for canonical digest
+              uses: actions/download-artifact@v4
+              with:
+                  artifact-ids: ${{ steps.upload.outputs.artifact-id }}
+                  merge-multiple: true
+                  path: .artifact-roundtrip
+
+            - name: Normalize downloaded Vercel artifact
+              run: node scripts/normalize-vercel-artifact.mjs .artifact-roundtrip .vercel/output
+
+            - name: Compute post-round-trip Vercel artifact digest
+              id: digest
+              run: |
+                  if [ ! -f .vercel/output/config.json ]; then
+                    echo "Missing downloaded Vercel prebuilt output: .vercel/output/config.json"
+                    exit 1
+                  fi
+                  digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner --mode=0644 --format=gnu -cf - -C .vercel output | sha256sum | awk '{print $1}')"
+                  echo "artifact-digest=sha256:${digest}" >> "$GITHUB_OUTPUT"
+                  echo "Post-round-trip Vercel prebuilt artifact digest: sha256:${digest}"
+
+            - name: Verify round-trip canonical Vercel archive
+              id: archive-roundtrip
+              env:
+                  EXPECTED_SOURCE_DIGEST: ${{ steps.digest.outputs.artifact-digest }}
+              run: node scripts/verify-vercel-archive.mjs .artifact-roundtrip .vercel/output "$EXPECTED_SOURCE_DIGEST"
+
+    report-site-candidate-start:
+        name: Report blog/site Candidate start
+        needs: ci-summary
+        if: >-
+            always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode == 'candidate' && needs.ci-summary.result == 'success'
+        runs-on: ubuntu-latest
+        environment: production
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Validate candidate identity
+              env:
+                  PROJECT_SLUG: ${{ inputs.project_slug }}
+                  TARGET: ${{ inputs.target }}
+                  REQUESTED_COMMIT_SHA: ${{ inputs.commit_sha }}
+                  GITHUB_COMMIT_SHA: ${{ github.sha }}
+              run: |
+                  test "$PROJECT_SLUG" = "blog"
+                  test "$TARGET" = "site"
+                  test -n "$REQUESTED_COMMIT_SHA"
+                  test "$REQUESTED_COMMIT_SHA" = "$GITHUB_COMMIT_SHA"
+            - name: Request OAuth token for candidate contract
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  DEPLOYMENT_OAUTH_SCOPES: deployments:request,deployments:verify
+              run: node scripts/oauth-client-token.mjs
+            - name: Preflight deployment approval contract
+              uses: whynotsnow/snow-base-deployment-approval-action@76c3396eaa0635ef8de2c8668b77d939a292cbac
+              with:
+                  operation: contract
+                  token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
+                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  project-slug: ${{ inputs.project_slug }}
+                  target: ${{ inputs.target }}
+            - name: Request OAuth token for Candidate callback
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  DEPLOYMENT_OAUTH_SCOPES: deployments:run-update
+              run: node scripts/oauth-client-token.mjs
+            - name: Report Candidate in progress
+              uses: whynotsnow/snow-base-deployment-approval-action@76c3396eaa0635ef8de2c8668b77d939a292cbac
+              with:
+                  operation: candidate-callback
+                  token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
+                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  project-slug: ${{ inputs.project_slug }}
+                  target: ${{ inputs.target }}
+                  commit-sha: ${{ inputs.commit_sha || github.sha }}
+                  request-id: ${{ inputs.request_id }}
+                  github-run-id: ${{ github.run_id }}
+                  github-run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  callback-status: in_progress
+                  phase: validation_completed
+
+    deploy-production:
+        name: Production Deploy
+        needs:
+            - ci-summary
+            - build-vercel-artifact
+        if: >-
+            github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode == 'legacy-break-glass'
+        runs-on: ubuntu-latest
+        environment: production
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+
+            - name: Require legacy break-glass justification
+              env:
+                  BREAK_GLASS_REASON: ${{ inputs.break_glass_reason }}
+              run: |
+                  if [ -z "${BREAK_GLASS_REASON//[[:space:]]/}" ]; then
+                    echo "Legacy production mode requires break_glass_reason."
+                    exit 1
+                  fi
+                  echo "Legacy break-glass deployment requested with a maintainer-supplied justification."
+
+            - name: Verify origin main commit
+              run: |
+                  git fetch origin main --depth=1
+                  MAIN_SHA="$(git rev-parse origin/main)"
+                  if [ "$GITHUB_SHA" != "$MAIN_SHA" ]; then
+                    echo "Production deploy must run from origin/main."
+                    echo "Current commit: $GITHUB_SHA"
+                    echo "origin/main: $MAIN_SHA"
+                    exit 1
+                  fi
+
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+
+            - name: Enable pnpm
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.22.0 --activate
+
+            - name: Validate deployment secrets
+              env:
+                  DEPLOY_APPROVAL_TOKEN: ${{ secrets.DEPLOY_APPROVAL_TOKEN }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+              run: |
+                  missing=0
+                  for name in DEPLOY_APPROVAL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_TOKEN; do
+                    if [ -z "${!name}" ]; then
+                      echo "Missing required production environment secret: $name"
+                      missing=1
+                    fi
+                  done
+                  if [ "$missing" -ne 0 ]; then
+                    exit 1
+                  fi
+
+            - name: Download Vercel artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: ${{ needs.build-vercel-artifact.outputs.artifact-name }}
+                  path: .artifact-download
+
+            - name: Normalize downloaded Vercel artifact
+              run: node scripts/normalize-vercel-artifact.mjs .artifact-download .vercel/output
+
+            - name: Verify Vercel artifact digest
+              env:
+                  EXPECTED_ARTIFACT_DIGEST: ${{ needs.build-vercel-artifact.outputs.artifact-digest }}
+              run: |
+                  if [ ! -f .vercel/output/config.json ]; then
+                    echo "Downloaded artifact is not a Vercel prebuilt output: missing .vercel/output/config.json"
+                    exit 1
+                  fi
+                  digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner --mode=0644 --format=gnu -cf - -C .vercel output | sha256sum | awk '{print $1}')"
+                  actual="sha256:${digest}"
+                  echo "Downloaded Vercel prebuilt artifact digest: ${actual}"
+                  if [ "$actual" != "$EXPECTED_ARTIFACT_DIGEST" ]; then
+                    echo "Downloaded artifact digest mismatch."
+                    echo "Expected: $EXPECTED_ARTIFACT_DIGEST"
+                    echo "Actual: $actual"
+                    exit 1
+                  fi
+                  echo "DEPLOY_APPROVAL_ARTIFACT_DIGEST=${actual}" >> "$GITHUB_ENV"
+
+            - name: Verify deployment approval
+              env:
+                  DEPLOY_APPROVAL_TOKEN: ${{ secrets.DEPLOY_APPROVAL_TOKEN }}
+                  DEPLOY_APPROVAL_WORKFLOW_MODE: legacy-break-glass
+                  DEPLOY_APPROVAL_PROJECT: blog
+                  DEPLOY_APPROVAL_TARGET: site
+                  DEPLOY_APPROVAL_COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+                  DEPLOY_APPROVAL_REQUEST_SOURCE: github-actions
+                  DEPLOY_APPROVAL_REQUEST_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  DEPLOY_APPROVAL_ARTIFACT_TYPE: vercel-prebuilt
+                  DEPLOY_APPROVAL_ARTIFACT_DIGEST: ${{ env.DEPLOY_APPROVAL_ARTIFACT_DIGEST }}
+                  DEPLOY_APPROVAL_ARTIFACT_STORAGE_PROVIDER: github-actions
+                  DEPLOY_APPROVAL_ARTIFACT_STORAGE_KEY: ${{ needs.build-vercel-artifact.outputs.artifact-id }}
+                  DEPLOY_APPROVAL_VALIDATION_SUMMARY: snow build CI full validation completed; deployment uses downloaded GitHub Actions Vercel prebuilt artifact with verified digest.
+                  DEPLOY_APPROVAL_WAIT_SECONDS: "900"
+              run: node scripts/verify-deployment-approval.mjs
+
+            - name: Deploy Vercel production
+              env:
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+              run: pnpm dlx vercel@latest deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
+
+    register-site-candidate:
+        name: Register blog/site Candidate
+        needs:
+            - ci-summary
+            - build-vercel-artifact
+        if: >-
+            github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode == 'candidate'
+        outputs:
+            artifact-id: ${{ steps.register.outputs.artifact-id }}
+            artifact-digest: ${{ steps.register.outputs.artifact-digest }}
+        runs-on: ubuntu-latest
+        environment: production
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Download Vercel artifact
+              uses: actions/download-artifact@v4
+              with:
+                  name: ${{ needs.build-vercel-artifact.outputs.artifact-name }}
+                  path: .artifact-download
+
+            - name: Normalize downloaded Vercel artifact
+              run: node scripts/normalize-vercel-artifact.mjs .artifact-download .vercel/output
+            - name: Verify Vercel artifact digest
+              env:
+                  EXPECTED_ARTIFACT_DIGEST: ${{ needs.build-vercel-artifact.outputs.artifact-digest }}
+              run: |
+                  if [ ! -f .vercel/output/config.json ]; then
+                    echo "Downloaded artifact is not a Vercel prebuilt output."
+                    exit 1
+                  fi
+                  digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner --mode=0644 --format=gnu -cf - -C .vercel output | sha256sum | awk '{print $1}')"
+                  actual="sha256:${digest}"
+                  if [ "$actual" != "$EXPECTED_ARTIFACT_DIGEST" ]; then
+                    echo "Candidate artifact digest mismatch."
+                    exit 1
+                  fi
+                  echo "DEPLOY_APPROVAL_ARTIFACT_DIGEST=${actual}" >> "$GITHUB_ENV"
+            - name: Verify candidate canonical Vercel archive
+              env:
+                  EXPECTED_SOURCE_DIGEST: ${{ needs.build-vercel-artifact.outputs.artifact-digest }}
+              run: node scripts/verify-vercel-archive.mjs .artifact-download .vercel/output "$EXPECTED_SOURCE_DIGEST"
+            - name: Prepare candidate artifact metadata
+              id: candidate-artifact-meta
+              run: echo "expires-at=$(date -u -d '+7 days' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+            - name: Request OAuth token for Candidate registration
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  DEPLOYMENT_OAUTH_SCOPES: deployments:request
+              run: node scripts/oauth-client-token.mjs
+            - name: Register site candidate artifact
+              id: register
+              uses: whynotsnow/snow-base-deployment-approval-action@76c3396eaa0635ef8de2c8668b77d939a292cbac
+              with:
+                  operation: register-artifact
+                  token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
+                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  project-slug: blog
+                  target: site
+                  commit-sha: ${{ inputs.commit_sha || github.sha }}
+                  artifact-type: vercel-prebuilt
+                  artifact-digest: ${{ env.DEPLOY_APPROVAL_ARTIFACT_DIGEST }}
+                  storage-provider: github-actions
+                  storage-key: ${{ needs.build-vercel-artifact.outputs.artifact-id }}
+                  artifact-role: candidate
+                  request-source: github-actions
+                  request-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  expires-at: ${{ steps.candidate-artifact-meta.outputs.expires-at }}
+                  build-status: succeeded
+                  validation-status: succeeded
+                  metadata-json: >-
+                      {"canonicalArchiveName":"vercel-output.tar.gz","githubArtifactId":"${{ needs.build-vercel-artifact.outputs.artifact-id }}","githubArtifactRunId":"${{ github.run_id }}","githubArtifactName":"${{ needs.build-vercel-artifact.outputs.artifact-name }}","sourceArtifactDigest":"${{ needs.build-vercel-artifact.outputs.artifact-digest }}","archiveDigest":"${{ needs.build-vercel-artifact.outputs.archive-digest }}","archiveSizeBytes":${{ needs.build-vercel-artifact.outputs.archive-size }},"capability":"central-artifact-promotion","workflowMode":"candidate","protocolVersion":"v2"}
+
+    report-site-candidate-completion:
+        name: Report blog/site Candidate completion
+        needs:
+            - ci-summary
+            - report-site-candidate-start
+            - build-vercel-artifact
+            - register-site-candidate
+        if: >-
+            always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode == 'candidate'
+        runs-on: ubuntu-latest
+        environment: production
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Request OAuth token for Candidate callback
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  DEPLOYMENT_OAUTH_SCOPES: deployments:run-update
+              run: node scripts/oauth-client-token.mjs
+            - name: Report Candidate completion
+              uses: whynotsnow/snow-base-deployment-approval-action@76c3396eaa0635ef8de2c8668b77d939a292cbac
+              with:
+                  operation: candidate-callback
+                  token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
+                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  project-slug: ${{ inputs.project_slug }}
+                  target: ${{ inputs.target }}
+                  commit-sha: ${{ inputs.commit_sha || github.sha }}
+                  request-id: ${{ inputs.request_id }}
+                  github-run-id: ${{ github.run_id }}
+                  github-run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  callback-status: completed
+                  conclusion: ${{ (needs.ci-summary.result == 'success' && needs.report-site-candidate-start.result == 'success' && needs.build-vercel-artifact.result == 'success' && needs.register-site-candidate.result == 'success') && 'success' || 'failure' }}
+                  phase: candidate_completed
+                  error-code: ${{ (needs.ci-summary.result == 'success' && needs.report-site-candidate-start.result == 'success' && needs.build-vercel-artifact.result == 'success' && needs.register-site-candidate.result == 'success') && '' || 'candidate_workflow_failed' }}
+                  artifact-id: ${{ needs.register-site-candidate.outputs.artifact-id }}
+                  artifact-digest: ${{ needs.register-site-candidate.outputs.artifact-digest }}
+
+    deploy-selected-artifact:
+        name: Deploy selected blog/site artifact
+        needs: ci-summary
+        if: >-
+            github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode == 'selected-artifact'
+        runs-on: ubuntu-latest
+        environment: production
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+              with:
+                  fetch-depth: 0
+                  ref: ${{ inputs.commit_sha }}
+            - name: Validate selected artifact inputs
+              env:
+                  PROJECT_SLUG: ${{ inputs.project_slug }}
+                  TARGET: ${{ inputs.target }}
+                  COMMIT_SHA: ${{ inputs.commit_sha }}
+                  REQUEST_ID: ${{ inputs.request_id }}
+                  ARTIFACT_ID: ${{ inputs.artifact_id }}
+                  ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+                  ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+                  ARTIFACT_GITHUB_ID: ${{ inputs.artifact_github_id }}
+                  ARTIFACT_NAME: ${{ inputs.artifact_name }}
+              run: |
+                  test "$PROJECT_SLUG" = "blog"
+                  test "$TARGET" = "site"
+                  printf '%s' "$COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'
+                  test "$(git rev-parse HEAD)" = "$COMMIT_SHA"
+                  test -n "$REQUEST_ID"
+                  test -n "$ARTIFACT_ID"
+                  printf '%s' "$ARTIFACT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+                  printf '%s' "$ARTIFACT_RUN_ID" | grep -Eq '^[0-9]+$'
+                  printf '%s' "$ARTIFACT_GITHUB_ID" | grep -Eq '^[0-9]+$'
+                  test -n "$ARTIFACT_NAME"
+            - name: Request OAuth token for selected contract
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  DEPLOYMENT_OAUTH_SCOPES: deployments:request,deployments:verify
+              run: node scripts/oauth-client-token.mjs
+            - name: Preflight deployment approval contract
+              uses: whynotsnow/snow-base-deployment-approval-action@76c3396eaa0635ef8de2c8668b77d939a292cbac
+              with:
+                  operation: contract
+                  token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
+                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  project-slug: ${{ inputs.project_slug }}
+                  target: ${{ inputs.target }}
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Enable pnpm
+              run: |
+                  corepack enable
+                  corepack prepare pnpm@10.22.0 --activate
+            - name: Validate deployment secrets
+              env:
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_SECRET }}
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+              run: |
+                  if [ -z "$SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID" ]; then
+                    echo "Missing required production environment variable: SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID"
+                    exit 1
+                  fi
+                  if ! printf '%s' "$SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID" | grep -Eq '^cli_[A-Za-z0-9_-]{1,128}$'; then
+                    echo "Invalid production environment variable format: SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID"
+                    exit 1
+                  fi
+                  if [ -z "$SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET" ]; then
+                    echo "Missing required production environment secret: SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET"
+                    exit 1
+                  fi
+                  if ! printf '%s' "$SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET" | grep -Eq '^[A-Za-z0-9_-]{43}$'; then
+                    echo "Invalid production environment secret format: SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET"
+                    exit 1
+                  fi
+                  for name in SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID; do
+                    if [ -z "${!name}" ]; then
+                      echo "Missing required production environment variable: $name"
+                      exit 1
+                    fi
+                    if ! printf '%s' "${!name}" | grep -Eq '^cli_[A-Za-z0-9_-]{1,128}$'; then
+                      echo "Invalid production environment variable format: $name"
+                      exit 1
+                    fi
+                  done
+                  for name in SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_SECRET; do
+                    if [ -z "${!name}" ]; then
+                      echo "Missing required production environment secret: $name"
+                      exit 1
+                    fi
+                    if ! printf '%s' "${!name}" | grep -Eq '^[A-Za-z0-9_-]{43}$'; then
+                      echo "Invalid production environment secret format: $name"
+                      exit 1
+                    fi
+                  done
+                  if [ "$SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID" = "$SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID" ] || \
+                     [ "$SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID" = "$SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID" ] || \
+                     [ "$SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID" = "$SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID" ]; then
+                    echo "Deployment OAuth Client IDs must be distinct across run, approval, and promotion roles"
+                    exit 1
+                  fi
+                  if [ -z "$VERCEL_ORG_ID" ]; then
+                    echo "Missing required production environment secret: VERCEL_ORG_ID"
+                    exit 1
+                  fi
+                  if [ -z "$VERCEL_PROJECT_ID" ]; then
+                    echo "Missing required production environment secret: VERCEL_PROJECT_ID"
+                    exit 1
+                  fi
+                  if [ -z "$VERCEL_TOKEN" ]; then
+                    echo "Missing required production environment secret: VERCEL_TOKEN"
+                    exit 1
+                  fi
+            - name: Download selected GitHub artifact
+              uses: actions/download-artifact@v4
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  repository: ${{ github.repository }}
+                  run-id: ${{ inputs.artifact_run_id }}
+                  artifact-ids: ${{ inputs.artifact_github_id }}
+                  merge-multiple: true
+                  path: .artifact-download
+            - name: Normalize downloaded Vercel artifact
+              run: node scripts/normalize-vercel-artifact.mjs .artifact-download .vercel/output
+            - name: Verify selected artifact digest
+              run: |
+                  test -f .vercel/output/config.json
+                  digest="$(tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner --mode=0644 --format=gnu -cf - -C .vercel output | sha256sum | awk '{print $1}')"
+                  actual="sha256:${digest}"
+                  test "$actual" = "${{ inputs.artifact_digest }}"
+            - name: Verify selected canonical Vercel archive
+              id: verify-selected-archive
+              env:
+                  EXPECTED_SOURCE_DIGEST: ${{ inputs.artifact_digest }}
+              run: node scripts/verify-vercel-archive.mjs .artifact-download .vercel/output "$EXPECTED_SOURCE_DIGEST"
+            - name: Request OAuth token for selected approval request
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  DEPLOYMENT_OAUTH_SCOPES: deployments:request,deployments:verify
+              run: node scripts/oauth-client-token.mjs
+            - name: Request or reuse selected artifact approval
+              id: request-approval
+              uses: whynotsnow/snow-base-deployment-approval-action@76c3396eaa0635ef8de2c8668b77d939a292cbac
+              with:
+                  operation: request-approval
+                  token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
+                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  project-slug: blog
+                  target: site
+                  commit-sha: ${{ inputs.commit_sha }}
+                  request-source: snow-base-admin
+                  request-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  idempotency-key: ${{ inputs.request_id }}
+                  artifact-id: ${{ inputs.artifact_id }}
+                  artifact-digest: ${{ inputs.artifact_digest }}
+                  change-summary: ${{ inputs.change_summary }}
+                  validation-summary: ${{ inputs.validation_summary || 'selected blog/site artifact was downloaded and digest-verified before approval consumption.' }}
+            - name: Wait for selected artifact approval
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  DEPLOY_APPROVAL_PROJECT: blog
+                  DEPLOY_APPROVAL_TARGET: site
+                  DEPLOY_APPROVAL_COMMIT_SHA: ${{ inputs.commit_sha }}
+                  DEPLOY_APPROVAL_REQUEST_ID: ${{ steps.request-approval.outputs.approval-id }}
+                  DEPLOYMENT_ARTIFACT_ID: ${{ inputs.artifact_id }}
+                  DEPLOYMENT_ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+                  DEPLOY_APPROVAL_WAIT_SECONDS: "900"
+                  DEPLOY_APPROVAL_POLL_SECONDS: "15"
+              run: node scripts/wait-deployment-approval.mjs
+            - name: Upload selected artifact to central R2 archive
+              id: multipart-promotion
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOY_APPROVAL_WORKFLOW_MODE: selected-artifact
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_SECRET }}
+                  DEPLOY_APPROVAL_ARTIFACT_ID: ${{ inputs.artifact_id }}
+                  DEPLOY_APPROVAL_ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+                  DEPLOY_APPROVAL_APPROVAL_ID: ${{ steps.request-approval.outputs.approval-id }}
+                  DEPLOY_APPROVAL_ARCHIVE_PATH: .artifact-download/vercel-output.tar.gz
+                  DEPLOY_APPROVAL_ARCHIVE_DIGEST: ${{ steps.verify-selected-archive.outputs.archive-digest }}
+                  DEPLOY_APPROVAL_ARCHIVE_SIZE_BYTES: ${{ steps.verify-selected-archive.outputs.archive-size }}
+                  DEPLOY_APPROVAL_PROMOTION_PURPOSE: selected-production
+              run: node scripts/promote-deployment-artifact.mjs
+            - name: Request OAuth token for selected approval consumption
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  DEPLOYMENT_OAUTH_SCOPES: deployments:request,deployments:verify
+              run: node scripts/oauth-client-token.mjs
+            - name: Consume selected artifact approval
+              uses: whynotsnow/snow-base-deployment-approval-action@76c3396eaa0635ef8de2c8668b77d939a292cbac
+              with:
+                  operation: consume-approval
+                  token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
+                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  project-slug: blog
+                  target: site
+                  commit-sha: ${{ inputs.commit_sha }}
+                  approval-id: ${{ steps.request-approval.outputs.approval-id }}
+                  artifact-id: ${{ inputs.artifact_id }}
+                  artifact-digest: ${{ inputs.artifact_digest }}
+            - name: Report deployment run in progress
+              id: report-deployment-run-start
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  DEPLOY_APPROVAL_PROJECT: ${{ inputs.project_slug }}
+                  DEPLOY_APPROVAL_TARGET: ${{ inputs.target }}
+                  DEPLOY_APPROVAL_COMMIT_SHA: ${{ inputs.commit_sha }}
+                  DEPLOY_APPROVAL_REQUEST_ID: ${{ inputs.request_id }}
+                  DEPLOYMENT_ARTIFACT_ID: ${{ inputs.artifact_id }}
+                  DEPLOYMENT_ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+                  DEPLOYMENT_CALLBACK_STATUS: in_progress
+                  DEPLOYMENT_CALLBACK_PHASE: deployment_started
+              run: node scripts/report-deployment-run.mjs
+            - name: Deploy Vercel production
+              id: deploy-vercel
+              env:
+                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+              run: pnpm dlx vercel@latest deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
+
+    report-selected-deployment-run-completion:
+        name: Report selected blog/site deployment completion
+        needs:
+            - ci-summary
+            - deploy-selected-artifact
+        if: >-
+            always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode == 'selected-artifact'
+        runs-on: ubuntu-latest
+        environment: production
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Report deployment run completion
+              id: report-deployment-run
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  DEPLOY_APPROVAL_PROJECT: ${{ inputs.project_slug }}
+                  DEPLOY_APPROVAL_TARGET: ${{ inputs.target }}
+                  DEPLOY_APPROVAL_COMMIT_SHA: ${{ inputs.commit_sha }}
+                  DEPLOY_APPROVAL_REQUEST_ID: ${{ inputs.request_id }}
+                  DEPLOYMENT_ARTIFACT_ID: ${{ inputs.artifact_id }}
+                  DEPLOYMENT_ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+                  DEPLOYMENT_CALLBACK_STATUS: completed
+                  DEPLOYMENT_CALLBACK_CONCLUSION: ${{ (needs.ci-summary.result == 'success' && needs.deploy-selected-artifact.result == 'success') && 'success' || 'failure' }}
+                  DEPLOYMENT_CALLBACK_PHASE: deployment_completed
+                  DEPLOYMENT_CALLBACK_ERROR_CODE: ${{ (needs.ci-summary.result == 'success' && needs.deploy-selected-artifact.result == 'success') && '' || 'deployment_workflow_failed' }}
+              run: node scripts/report-deployment-run.mjs
+            - name: Run public production smoke
+              id: public-smoke
+              if: ${{ needs.ci-summary.result == 'success' && needs.deploy-selected-artifact.result == 'success' }}
+              continue-on-error: true
+              env:
+                  DEPLOYMENT_SMOKE_BASE_URL: https://blog.whynotsnow.com
+              run: node scripts/production-smoke.mjs
+            - name: Classify smoke evidence outcome
+              id: classify-smoke
+              if: always()
+              env:
+                  PUBLIC_SMOKE_OUTCOME: ${{ steps.public-smoke.outcome }}
+                  PUBLIC_SMOKE_FAILURE_CODE: ${{ steps.public-smoke.outputs.smoke-failure-code }}
+                  DEPLOYMENT_RUN_REPORT_OUTCOME: ${{ steps.report-deployment-run.outcome }}
+                  CI_SUMMARY_OUTCOME: ${{ needs.ci-summary.result }}
+                  DEPLOYMENT_JOB_OUTCOME: ${{ needs.deploy-selected-artifact.result }}
+              run: |
+                  if [[ "$CI_SUMMARY_OUTCOME" != "success" || "$DEPLOYMENT_JOB_OUTCOME" != "success" || "$DEPLOYMENT_RUN_REPORT_OUTCOME" != "success" ]]; then
+                    echo "outcome=failed" >> "$GITHUB_OUTPUT"
+                    echo "failure-code=deployment_workflow_failed" >> "$GITHUB_OUTPUT"
+                  elif [[ "$PUBLIC_SMOKE_OUTCOME" == "success" ]]; then
+                    echo "outcome=succeeded" >> "$GITHUB_OUTPUT"
+                    echo "failure-code=" >> "$GITHUB_OUTPUT"
+                  elif [[ "$PUBLIC_SMOKE_OUTCOME" == "failure" ]]; then
+                    echo "outcome=failed" >> "$GITHUB_OUTPUT"
+                    echo "failure-code=${PUBLIC_SMOKE_FAILURE_CODE:-public_smoke_failed}" >> "$GITHUB_OUTPUT"
+                  elif [[ "$PUBLIC_SMOKE_OUTCOME" == "skipped" ]]; then
+                    echo "outcome=failed" >> "$GITHUB_OUTPUT"
+                    echo "failure-code=smoke_skipped" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "outcome=failed" >> "$GITHUB_OUTPUT"
+                    echo "failure-code=smoke_outcome_unknown" >> "$GITHUB_OUTPUT"
+                  fi
+            - name: Record run-bound smoke evidence
+              if: always()
+              env:
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOY_APPROVAL_WORKFLOW_MODE: selected-artifact
+                  DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  DEPLOY_APPROVAL_PROJECT: blog
+                  DEPLOY_APPROVAL_TARGET: site
+                  DEPLOYMENT_RUN_ID: ${{ steps.report-deployment-run.outputs.deployment-run-id }}
+                  DEPLOYMENT_SMOKE_OUTCOME: ${{ steps.classify-smoke.outputs.outcome }}
+                  DEPLOYMENT_SMOKE_FAILURE_CODE: ${{ steps.classify-smoke.outputs.failure-code }}
+              run: node scripts/report-deployment-smoke.mjs
+            - name: Fail when public smoke failed
+              if: ${{ steps.classify-smoke.outputs.outcome != 'succeeded' }}
+              run: exit 1

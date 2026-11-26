@@ -1,0 +1,21 @@
+---
+import AnimePage from "../components/anime/AnimePage.astro";
+import { siteConfig } from "../config";
+import MainGridLayout from "../layouts/MainGridLayout.astro";
+import "@/components/anime/anime.css";
+import { buildAnimePageModel } from "@/services/anime";
+
+if (!siteConfig.featurePages.anime) {
+	return Astro.redirect("/404/");
+}
+
+const animePageModel = buildAnimePageModel();
+---
+
+<MainGridLayout
+	title={animePageModel.title}
+	description={animePageModel.subtitle}
+	layoutPolicy="content"
+>
+	<AnimePage model={animePageModel} />
+</MainGridLayout>

@@ -1,0 +1,149 @@
+---
+import AlbumEncryptor from "../../../components/Encryptor.astro";
+import PhotoCard from "../../../components/albums/PhotoCard.astro";
+import { siteConfig } from "../../../config";
+import I18nKey from "../../../i18n/i18nKey";
+import { i18n } from "../../../i18n/translation";
+import MainGridLayout from "../../../layouts/MainGridLayout.astro";
+import "@/components/albums/albums.css";
+import type { AlbumGroup, Photo } from "../../../types/album";
+import { scanAlbums } from "../../../utils/album-scanner";
+
+if (!siteConfig.featurePages.albums) {
+	return Astro.redirect("/404/");
+}
+
+export const getStaticPaths = async () => {
+	const albumsData = await scanAlbums();
+	return albumsData.map((album) => ({
+		params: { id: album.id },
+		props: { album },
+	}));
+};
+
+interface Props {
+	album: AlbumGroup;
+}
+
+const { album } = Astro.props;
+
+if (!album) {
+	return Astro.redirect("/404/");
+}
+
+const isEncrypted = Boolean(album.password);
+const photoCountLabel =
+	album.photos.length > 1
+		? i18n(I18nKey.albumsPhotosCount)
+		: i18n(I18nKey.albumsPhotoCount);
+---
+
+<MainGridLayout
+	title={album.title}
+	description={album.description || album.title}
+	layoutPolicy="content"
+>
+	<section class="album-hero">
+		<div class="album-hero__media">
+			<img
+				src={album.cover}
+				alt={album.title}
+				class="album-hero__image"
+				loading="eager"
+				decoding="async"
+			/>
+			<div class="album-hero__overlay"></div>
+
+			<a href="/albums/" class="album-hero__back">
+				<svg
+					class="h-4 w-4"
+					fill="none"
+					stroke="currentColor"
+					viewBox="0 0 24 24"
+					aria-hidden="true"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M15 19l-7-7 7-7"></path>
+				</svg>
+				{i18n(I18nKey.albumsBackToList)}
+			</a>
+
+			<div class="album-hero__content">
+				<h1>{album.title}</h1>
+				{album.description && <p>{album.description}</p>}
+
+				<div class="album-hero__meta">
+					<time>{new Date(album.date).toLocaleDateString("zh-CN")}</time>
+					{album.location && <span>{album.location}</span>}
+					<span>{album.photos.length} {photoCountLabel}</span>
+					{isEncrypted && <span>{i18n(I18nKey.passwordProtected)}</span>}
+				</div>
+
+				{
+					album.tags && album.tags.length > 0 && (
+						<div class="album-hero__tags">
+							{album.tags.map((tag: string) => (
+								<span>{tag}</span>
+							))}
+						</div>
+					)
+				}
+			</div>
+		</div>
+	</section>
+
+	<section class="card-base album-gallery-card">
+		{
+			isEncrypted ? (
+				<AlbumEncryptor password={album.password || ""}>
+					<div class="gallery-masonry">
+						{album.photos.map((photo: Photo) => (
+							<PhotoCard
+								photo={photo}
+								albumId={album.id}
+							/>
+						))}
+					</div>
+				</AlbumEncryptor>
+			) : album.photos.length > 0 ? (
+				<div
+					class:list={[
+						"photo-gallery",
+						"gallery-masonry",
+						album.layout === "grid" && "gallery-grid",
+					]}
+					data-layout={album.layout || "masonry"}
+					data-columns={album.columns || 3}
+				>
+					{album.photos.map((photo: Photo) => (
+						<PhotoCard
+							photo={photo}
+							albumId={album.id}
+						/>
+					))}
+				</div>
+			) : (
+				<div class="album-empty-state">
+					<svg
+						class="w-16 h-16"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+						aria-hidden="true"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="1"
+							d="M4 16l4.586-4.586a2 2 0 0 1 2.828 0L16 16m-2-2 1.586-1.586a2 2 0 0 1 2.828 0L20 14m-6-6h.01M6 20h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"
+						/>
+					</svg>
+					<p>{i18n(I18nKey.albumsEmpty)}</p>
+				</div>
+			)
+		}
+	</section>
+</MainGridLayout>

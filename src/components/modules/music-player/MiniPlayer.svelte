@@ -1,0 +1,137 @@
+<script lang="ts">
+	import LocalIcon from "@/components/ui/LocalIcon.svelte";
+	import type { MusicPlayerLabels, Song } from "./types";
+
+	export let currentSong: Song;
+	export let isExpanded = false;
+	export let isHidden = false;
+	export let isLoading = false;
+	export let isPlaying = false;
+	export let labels: MusicPlayerLabels;
+	export let getAssetPath: (path: string) => string;
+	export let onTogglePlay: () => void;
+	export let onToggleExpanded: () => void;
+	export let onToggleHidden: () => void;
+</script>
+
+<div
+	class="mini-player card-base bg-(--surface-overlay) shadow-xl rounded-2xl p-3"
+	class:opacity-0={isExpanded || isHidden}
+	class:scale-95={isExpanded || isHidden}
+	class:pointer-events-none={isExpanded || isHidden}
+>
+	<div class="flex items-center gap-3">
+		<div
+			class="mini-player__cover cover-container relative w-12 h-12 rounded-full overflow-hidden cursor-pointer"
+			on:click={onTogglePlay}
+			on:keydown={(event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					onTogglePlay();
+				}
+			}}
+			role="button"
+			tabindex="0"
+			aria-label={isPlaying ? labels.pause : labels.play}
+		>
+			<img
+				src={getAssetPath(currentSong.cover)}
+				alt={labels.cover}
+				class="w-full h-full object-cover transition-transform duration-300"
+				class:spinning={isPlaying && !isLoading}
+				class:animate-pulse={isLoading}
+			/>
+			<div
+				class="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+			>
+				{#if isLoading}
+					<span
+						class="local-loading-icon mini-player__control-icon text-white"
+						aria-hidden="true"
+					></span>
+				{:else if isPlaying}
+					<LocalIcon
+						name="material-symbols:pause"
+						class="mini-player__control-icon text-white"
+					/>
+				{:else}
+					<LocalIcon
+						name="material-symbols:play-arrow"
+						class="mini-player__control-icon text-white"
+					/>
+				{/if}
+			</div>
+		</div>
+
+		<div
+			class="mini-player__meta flex-1 min-w-0 cursor-pointer"
+			on:click={onToggleExpanded}
+			on:keydown={(event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					onToggleExpanded();
+				}
+			}}
+			role="button"
+			tabindex="0"
+			aria-label={labels.expand}
+		>
+			<div class="mini-player__title font-medium text-90 truncate">
+				{currentSong.title}
+			</div>
+			<div class="mini-player__artist text-50 truncate">
+				{currentSong.artist}
+			</div>
+		</div>
+
+		<div class="mini-player__actions flex items-center gap-1">
+			<button
+				class="btn-plain w-8 h-8 rounded-lg flex items-center justify-center"
+				on:click|stopPropagation={onToggleHidden}
+				title={labels.collapse}
+			>
+				<LocalIcon
+					name="material-symbols:visibility-off"
+					class="text-[var(--text-section-title-size)]"
+				/>
+			</button>
+			<button
+				class="btn-plain w-8 h-8 rounded-lg flex items-center justify-center"
+				on:click|stopPropagation={onToggleExpanded}
+			>
+				<LocalIcon
+					name="material-symbols:expand-less"
+					class="text-[var(--text-section-title-size)]"
+				/>
+			</button>
+		</div>
+	</div>
+</div>
+
+<style>
+	.local-loading-icon {
+		width: 1em;
+		height: 1em;
+		border: 2px solid currentcolor;
+		border-right-color: transparent;
+		border-radius: 999px;
+		animation: local-icon-spin 0.75s linear infinite;
+	}
+
+	.mini-player__control-icon {
+		font-size: var(--text-card-title-size);
+	}
+
+	.mini-player__title {
+		font-size: var(--text-ui-size);
+	}
+
+	.mini-player__artist {
+		font-size: var(--text-caption-size);
+	}
+	@keyframes local-icon-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+</style>

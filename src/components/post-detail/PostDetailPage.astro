@@ -1,0 +1,189 @@
+---
+import Comment from "@components/comment/index.astro";
+import TwikooHead from "@components/comment/TwikooHead.astro";
+import License from "@components/misc/License.astro";
+import Markdown from "@components/misc/Markdown.astro";
+import MainGridLayout from "@layouts/MainGridLayout.astro";
+import { commentConfig, licenseConfig, shareConfig } from "@/config";
+import ImageWrapper from "@components/misc/ImageWrapper.astro";
+import { siteConfig } from "@/config";
+import { formatDateToYYYYMMDD } from "@utils/date-utils";
+import Encryptor from "@components/Encryptor.astro";
+import PostHeader from "./PostHeader.astro";
+import PostLastModified from "./PostLastModified.astro";
+import PostNavigation from "./PostNavigation.astro";
+import PostRelatedList from "./PostRelatedList.astro";
+import PostShareCard from "./PostShareCard.astro";
+import PostSupport from "./PostSupport.astro";
+import { buildTocItems } from "@components/post-toc/toc-data";
+import "./post-detail.css";
+import type { PostDetailPageProps } from "./types";
+
+const {
+	id,
+	title,
+	description,
+	author,
+	lang,
+	banner,
+	header,
+	cover,
+	encryption,
+	comment,
+	license,
+	navigation,
+	support,
+	canonicalUrl,
+	canonicalOgSlug,
+	Content,
+	headings,
+	lastModified,
+	jsonLd,
+	posterCoverUrl,
+	posterAvatarUrl,
+} = Astro.props as PostDetailPageProps;
+
+const staticTocItems = encryption.enabled
+	? []
+	: buildTocItems(headings, {
+			maxDepth: siteConfig.toc?.depth || 3,
+			useJapaneseBadge: siteConfig.toc?.useJapaneseBadge || false,
+		});
+const shouldLoadTwikooAssets =
+	comment.enabled && commentConfig?.enable && Boolean(commentConfig?.twikoo);
+---
+
+<MainGridLayout
+	{banner}
+	{title}
+	{description}
+	{lang}
+	setOGTypeArticle={true}
+	postSlug={canonicalOgSlug}
+	canonicalUrl={canonicalUrl}
+	headings={headings}
+	layoutPolicy="post"
+>
+	<script
+		is:inline
+		slot="head"
+		type="application/ld+json"
+		set:html={JSON.stringify(jsonLd)}
+	/>
+	{shouldLoadTwikooAssets && <TwikooHead slot="head" />}
+	<PostSupport
+		slot="support"
+		headings={headings}
+		tocItems={staticTocItems}
+		support={support}
+		deferTocHeadings={encryption.enabled}
+	/>
+	{
+		!encryption.enabled && (
+			<script
+				id="post-toc-data"
+				is:inline
+				type="application/json"
+				set:html={JSON.stringify(staticTocItems)}
+			/>
+		)
+	}
+	<div class="post-detail__shell relative">
+		<div
+			id="post-container"
+			class="post-detail__article post-detail__surface ds-surface-card z-10"
+			data-reading-title={title}
+			data-reading-minutes={header.minutes}
+		>
+			<div class="post-detail__reader-flow">
+				<PostHeader post={header} />
+
+				<!-- always show cover as long as it has one -->
+
+				{
+					cover && siteConfig.showCoverInContent && (
+						<ImageWrapper
+							id="post-cover"
+							src={cover.src}
+							basePath={cover.basePath}
+							class="post-detail__wide-block rounded-xl banner-container"
+						/>
+					)
+				}
+
+				{
+					encryption.enabled ? (
+						<Encryptor password={encryption.password}>
+							<Markdown class="post-detail__content post-detail__reading-block markdown-content">
+								<Content />
+							</Markdown>
+						</Encryptor>
+					) : (
+						<Markdown class="post-detail__content post-detail__reading-block markdown-content">
+							<Content />
+						</Markdown>
+					)
+				}
+
+				{
+					shareConfig.enable && (
+						<PostShareCard
+							class:list={[{ "encrypted-hidden": encryption.enabled }]}
+							{title}
+							{author}
+							description={description || ""}
+							pubDate={formatDateToYYYYMMDD(header.published)}
+							coverImage={posterCoverUrl}
+							url={canonicalUrl}
+							avatar={posterAvatarUrl}
+						/>
+					)
+				}
+
+				{
+					licenseConfig.enable && (
+						<section
+							id="license-component"
+							class:list={[
+								"post-detail__wide-block post-detail__aux-card",
+								"encrypted-hidden-wrapper",
+								{ "encrypted-hidden": encryption.enabled },
+							]}
+							aria-label="许可信息"
+						>
+							<License
+								{title}
+								{id}
+								pubDate={header.published}
+								{author}
+								sourceLink={license.sourceLink}
+								licenseName={license.licenseName}
+								licenseUrl={license.licenseUrl}
+								class="post-detail__license-content license-container"
+								bare
+							/>
+						</section>
+					)
+				}
+			</div>
+		</div>
+
+		<div class="post-detail__after-flow post-detail__surface ds-surface-card">
+			<div class="post-detail__after-flow-inner">
+				<PostRelatedList {support} />
+
+				<!-- 评论 -->
+				<Comment
+					enabled={comment.enabled}
+					path={comment.path}
+					className="post-detail__comment-card post-detail__aux-card"
+					bare
+				/>
+
+				{siteConfig.showLastModified && <PostLastModified {lastModified} />}
+
+				<PostNavigation next={navigation.next} prev={navigation.prev} />
+			</div>
+		</div>
+	</div>
+</MainGridLayout>

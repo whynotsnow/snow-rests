@@ -1,0 +1,58 @@
+---
+import PostMetadata from "@components/PostMeta.astro";
+import I18nKey from "@i18n/i18nKey";
+import { i18n } from "@i18n/translation";
+import type { PostDetailHeaderViewModel } from "@/services/post-detail/types";
+import { siteConfig } from "@/config";
+import { Icon } from "astro-icon/components";
+
+interface Props {
+	post: PostDetailHeaderViewModel;
+}
+
+const { post } = Astro.props;
+const { words, minutes } = post;
+---
+
+<header class="post-detail__header ds-reading-flow">
+	<div class="post-detail__meta flex flex-row text-50 gap-5 transition">
+		<div class="flex flex-row items-center">
+			<div class="transition h-6 w-6 rounded-md bg-(--line-divider) flex items-center justify-center mr-2">
+				<Icon name="material-symbols:notes-rounded" />
+			</div>
+			<div class="post-detail__stat-text">
+				{words}{" " + i18n(I18nKey.wordsCount)}
+			</div>
+		</div>
+		<div class="flex flex-row items-center">
+			<div class="transition h-6 w-6 rounded-md bg-(--line-divider) flex items-center justify-center mr-2">
+				<Icon name="material-symbols:schedule-outline-rounded" />
+			</div>
+			<div class="post-detail__stat-text">
+				{minutes}{" " + i18n(minutes === 1 ? I18nKey.minuteCount : I18nKey.minutesCount)}
+			</div>
+		</div>
+	</div>
+
+	<div class="relative">
+		<h1
+			data-pagefind-body
+			data-pagefind-weight="10"
+			data-pagefind-meta="title"
+			class="post-detail__title transition w-full block font-bold text-90"
+		>
+			{post.title}
+		</h1>
+	</div>
+
+	<PostMetadata
+		published={post.published}
+		updated={post.updated}
+		tags={post.tags}
+		category={post.category}
+		id={post.id}
+	/>
+	{(!post.hasCover || !siteConfig.showCoverInContent) && (
+		<div class="post-detail__header-divider border-(--line-divider) border-dashed border-b" />
+	)}
+</header>

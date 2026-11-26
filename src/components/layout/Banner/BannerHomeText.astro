@@ -1,0 +1,59 @@
+---
+import TypewriterText from "@components/TypewriterText.astro";
+import type { SiteConfig } from "@/types/config";
+
+interface Props {
+	homeText: SiteConfig["banner"]["homeText"];
+	showHomeText: boolean | undefined;
+}
+
+const { homeText, showHomeText } = Astro.props;
+const subtitle = homeText?.subtitle;
+const typewriterSubtitle =
+	subtitle && homeText?.typewriter?.enable ? subtitle : undefined;
+const staticSubtitle =
+	subtitle && !homeText?.typewriter?.enable
+		? Array.isArray(subtitle)
+			? subtitle[0]
+			: subtitle
+		: undefined;
+---
+
+{
+	homeText?.enable && (
+		<div
+			data-setting-target="banner-home-text"
+			class={`banner-text-overlay pointer-events-none absolute inset-0 z-20 flex ${!showHomeText ? "hidden" : ""}`}
+		>
+			<div>
+				<div class="flex flex-col">
+					{homeText.title && (
+						<h1 class="banner-title">
+							{homeText.title}
+						</h1>
+					)}
+					{typewriterSubtitle && (
+						<h2 class="banner-subtitle">
+							<span class="inline-block min-h-[1.2em]">
+								<TypewriterText
+									text={typewriterSubtitle}
+									speed={homeText.typewriter?.speed}
+									deleteSpeed={homeText.typewriter?.deleteSpeed}
+									pauseTime={homeText.typewriter?.pauseTime}
+									startDelay={1500}
+								/>
+							</span>
+						</h2>
+					)}
+					{staticSubtitle && (
+						<h2 class="banner-subtitle">
+							<span class="inline-block min-h-[1.2em]">
+								{staticSubtitle}
+							</span>
+						</h2>
+					)}
+				</div>
+			</div>
+		</div>
+	)
+}

@@ -1,0 +1,20 @@
+---
+import TimelinePage from "@/components/timeline/TimelinePage.astro";
+import { siteConfig } from "@/config";
+import { buildTimelinePageModel } from "@/services/timeline";
+import MainGridLayout from "@/layouts/MainGridLayout.astro";
+
+if (!siteConfig.featurePages.timeline) {
+	return Astro.redirect("/404/");
+}
+
+const model = buildTimelinePageModel();
+---
+
+<MainGridLayout
+	title={model.title}
+	description={model.subtitle}
+	layoutPolicy="content"
+>
+	<TimelinePage model={model} />
+</MainGridLayout>

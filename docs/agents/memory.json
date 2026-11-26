@@ -1,0 +1,265 @@
+{
+	"version": 2,
+	"updated": "2026-08-13",
+	"principle": "This project is not debugged repeatedly. It is learned once and reused forever.",
+	"architecture_constraints": [
+		{
+			"id": "service-layer-boundary",
+			"rule": "Normal post list, category, tag, archive, and post detail data should flow through src/services/core and feature services.",
+			"reason": "Bypassing the service layer fragments taxonomy, sorting, URL generation, and UI metadata behavior."
+		},
+		{
+			"id": "page-view-model-boundary",
+			"rule": "When splitting large route, layout, or component files, put page logic, data adaptation, config normalization, static path builders, and page-level view models in src/services/; keep src/pages thin and extracted page components mostly presentational.",
+			"reason": "The project already separates routing, page logic, and rendering; preserving this boundary prevents large files from reappearing under different names."
+		},
+		{
+			"id": "runtime-feature-boundary",
+			"rule": "Browser-only runtime interaction state such as DOM listeners, audio playback, pointer events, localStorage UI state, event contracts, controllers, and Svelte runtime stores should live beside the owning component module under src/components/modules/, not in src/services/.",
+			"reason": "src/services is for build-time/page-level logic and view models, while client interaction code is module-local runtime behavior."
+		},
+		{
+			"id": "content-store-contract",
+			"rule": "Use getContentStore() for normal post index access. Keep RawPost, Markdown bodies, rendered HTML, passwords, and detail-only frontmatter behind the post-detail build-time service boundary; Feed must consume only body-free PostIndexEntry values.",
+			"reason": "ContentStore is a lightweight, shared index; retaining or exposing raw entries recreates memory pressure and boundary leaks, while summary-only Feed output does not require raw content."
+		},
+		{
+			"id": "config-ownership",
+			"rule": "Treat src/config.ts as owner-specific site configuration, not upstream defaults.",
+			"reason": "This independently maintained project intentionally contains private layout, feature, and service choices."
+		}
+	],
+	"known_failures": [
+		{
+			"id": "playwright-spec-split-concurrency-drift",
+			"cluster": "test-architecture",
+			"symptoms": [
+				"splitting a large Playwright spec increases effective worker concurrency",
+				"unchanged assertions begin timing out or observing app globals before readiness"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#playwright-spec-split-concurrency-drift"
+		},
+		{
+			"id": "playwright-stale-dev-server-reuse",
+			"cluster": "browser-verification",
+			"symptoms": [
+				"full Playwright regression reports missing client islands across unrelated modules",
+				"browser console reports Cannot read properties of undefined (reading 'call')",
+				"same suites pass after stopping an old Astro or Vite dev server and starting a fresh one"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#playwright-stale-dev-server-reuse"
+		},
+		{
+			"id": "zsh-glob-expansion",
+			"cluster": "cli",
+			"symptoms": [
+				"zsh: no matches found",
+				"Astro route path with [] fails before command runs"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#zsh-glob-expansion"
+		},
+		{
+			"id": "bash-groups-special-variable",
+			"cluster": "cli",
+			"symptoms": [
+				"GitHub Actions Bash step prints valid test plan JSON and then exits with code 1",
+				"workflow assigns to GROUPS before writing GITHUB_OUTPUT",
+				"no JSON parse or coverage error appears before Process completed with exit code 1"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#bash-groups-special-variable"
+		},
+		{
+			"id": "ci-unavailable-push-base",
+			"cluster": "ci",
+			"symptoms": [
+				"GitHub Actions push validation plan fails after a force push",
+				"git diff reports Invalid symmetric difference expression for github.event.before",
+				"Browser, quality, fast, and build jobs are skipped because the plan job exits early"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#ci-unavailable-push-base"
+		},
+		{
+			"id": "astro-telemetry-side-effects",
+			"cluster": "framework",
+			"symptoms": [
+				"Astro command tries to write telemetry config outside workspace",
+				"EPERM under user preferences/home directory"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#astro-telemetry-side-effects"
+		},
+		{
+			"id": "pnpm-version-config-drift",
+			"cluster": "cli",
+			"symptoms": [
+				"pnpm field in package.json is ignored",
+				"ERR_PNPM_LOCKFILE_CONFIG_MISMATCH"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#pnpm-version-config-drift"
+		},
+		{
+			"id": "pnpm-non-tty-node-modules-purge",
+			"cluster": "cli",
+			"symptoms": [
+				"ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY",
+				"pnpm aborts before script execution"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#pnpm-non-tty-node-modules-purge"
+		},
+		{
+			"id": "pnpm-store-location-mismatch",
+			"cluster": "cli",
+			"symptoms": [
+				"ERR_PNPM_UNEXPECTED_STORE",
+				"existing node_modules is linked from a different pnpm store",
+				"historical config may point pnpm at a project-local .pnpm-store instead of the default user-level store"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#pnpm-store-location-mismatch"
+		},
+		{
+			"id": "generated-font-dev-drift",
+			"cluster": "build-pipeline",
+			"symptoms": [
+				"development requests generated WOFF2 paths with 404 responses",
+				"font preparation reports no configuration after configuration files were split",
+				"production output contains full source TTF files alongside or instead of subsets"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#generated-font-dev-drift"
+		},
+		{
+			"id": "astro-content-cache-asset-drift",
+			"cluster": "build-pipeline",
+			"symptoms": [
+				"production HTML references /_astro/ec.<hash>.css but dist/_astro contains a different ec.<hash>.css",
+				"stylesheet requests for Expressive Code CSS return text/html",
+				"browser reports strict MIME checking refused an Expressive Code stylesheet"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#astro-content-cache-asset-drift"
+		},
+		{
+			"id": "md051-emoji-heading-fragments",
+			"cluster": "markdown",
+			"symptoms": ["MD051/link-fragments reports emoji heading anchors"],
+			"playbook": "docs/agents/runtime-playbook.md#md051-emoji-heading-fragments"
+		},
+		{
+			"id": "global-style-entrypoint-drift",
+			"cluster": "styles",
+			"symptoms": [
+				"global card styles disappear",
+				".card-base loses background or radius",
+				"runtime CSS variables such as --card-bg are empty",
+				"stylesheet compile errors appear after restoring global style imports"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#global-style-entrypoint-drift"
+		},
+		{
+			"id": "fullscreen-banner-responsive-override",
+			"cluster": "styles",
+			"symptoms": [
+				"fullscreen banner mode does not fill the first viewport",
+				"header waves are not aligned to the first screen bottom",
+				"later responsive banner height rules override fullscreen 100vh"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#fullscreen-banner-responsive-override"
+		},
+		{
+			"id": "feature-media-visibility-and-lightbox-drift",
+			"cluster": "styles",
+			"symptoms": [
+				"album or diary cards render clickable blank regions because opacity remains 0",
+				"Fancybox opens but project styling or image sizing is not applied after migrating feature media",
+				"Fancybox v6 DOM uses f-carousel, f-button, f-thumbs, or f-panzoom classes while custom CSS targets older class names"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#feature-media-visibility-and-lightbox-drift"
+		},
+		{
+			"id": "banner-entry-geometry-feedback",
+			"cluster": "runtime-layout",
+			"symptoms": [
+				"category or post entry scrolling lands at inconsistent offsets",
+				"scripted scroll changes Navbar state and invalidates the measured target",
+				"browser history leaves mobile-main-no-banner on a Banner listing page",
+				"a content-layer top transition makes entry geometry use the old position"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#banner-entry-geometry-feedback"
+		},
+		{
+			"id": "same-origin-iframe-frame-policy",
+			"cluster": "deployment-security",
+			"symptoms": [
+				"same-site iframe fails in production with X-Frame-Options deny",
+				"Live2D companion iframe stays unloaded even though the static host file exists"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#same-origin-iframe-frame-policy"
+		},
+		{
+			"id": "vercel-git-autodeploy-approval-bypass",
+			"cluster": "deployment-security",
+			"symptoms": [
+				"Vercel Git Integration can deploy the production branch after a main push without waiting for the snow-base approval workflow",
+				"vercel.json ignoreCommand uses a custom non-secret environment variable as an approval bypass or allow marker",
+				"Production deployment has both an approved GitHub Actions path and an uncontrolled Vercel Git auto-deploy path"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#vercel-git-autodeploy-approval-bypass"
+		},
+		{
+			"id": "vercel-artifact-pre-roundtrip-digest",
+			"cluster": "deployment-security",
+			"symptoms": [
+				"candidate digest computed before actions/upload-artifact@v4 differs from the digest after actions/download-artifact@v4",
+				"artifact download succeeds but the selected-artifact digest guard fails",
+				"deterministic tar fixes names, timestamps, and ownership but not all normalized representation details"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#vercel-artifact-pre-roundtrip-digest"
+		},
+		{
+			"id": "cloudflare-free-plan-archive-promotion",
+			"cluster": "deployment-archive",
+			"symptoms": [
+				"central archive promotion or repair returns 503 while processing a large Vercel artifact",
+				"a Cloudflare Worker downloads, converts, hashes, or buffers the complete legacy ZIP or canonical gzip",
+				"the proposed repair depends on Paid-plan Worker CPU limits"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#cloudflare-free-plan-archive-promotion"
+		},
+		{
+			"id": "mermaid-prerender-ci-browser-lifecycle",
+			"cluster": "build-pipeline",
+			"symptoms": [
+				"CI fast tests fail Mermaid prerendering because Playwright Chromium was not installed in the fast-tests job",
+				"Astro build fails while prerendering multiple Mermaid diagrams with page.close or page.evaluate reporting that the target page, context, or browser has been closed",
+				"local full validation passes but remote GitHub Actions full validation fails during Mermaid prerendering"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#mermaid-prerender-ci-browser-lifecycle"
+		},
+		{
+			"id": "playwright-chromium-mac-sandbox",
+			"cluster": "runtime-environment",
+			"severity": "medium",
+			"description": "Chromium can be unable to launch inside the Codex macOS sandbox because Mach port rendezvous permission is blocked.",
+			"symptoms": [
+				"Playwright Chromium launch fails before navigation",
+				"MachPortRendezvousServer Permission denied (1100)",
+				"browser process exits with SIGTRAP in the sandbox"
+			],
+			"affected": [
+				"Playwright",
+				"visual regression",
+				"browser automation"
+			],
+			"solutions": [
+				"run the selected Playwright command in host Terminal through Computer Use when available",
+				"run automated browser validation in CI",
+				"ask the user to run the exact selected Playwright command in a normal host Terminal when no external tool is available",
+				"do not use in-app Browser solely because Playwright failed to launch",
+				"do not fall back to agent-controlled Chrome"
+			],
+			"playbook": "docs/agents/runtime-playbook.md#playwright-chromium-mac-sandbox",
+			"requirements": "docs/agents/runtime-requirements.md#project-browser-contract"
+		}
+	],
+	"validation_truthfulness": {
+		"rule": "Do not claim that a command passed unless it actually ran and returned success in this workspace.",
+		"failure_preflight_rule": "If a package manager fails before invoking a target script, report package-manager preflight failure separately from script validation."
+	}
+}

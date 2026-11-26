@@ -1,0 +1,22 @@
+---
+import MainGridLayout from "@/layouts/MainGridLayout.astro";
+import CategoryPage from "@components/category/CategoryPage.astro";
+import CategorySupport from "@components/category/CategorySupport.astro";
+import {
+	getCategoryIndexStaticPaths,
+	type CategoryPageProps,
+} from "@/services/category-page";
+
+export const getStaticPaths = getCategoryIndexStaticPaths;
+
+const { posts, pagination, categories, categorySlug, tagIndexUrl, support } =
+	Astro.props as CategoryPageProps;
+---
+
+<MainGridLayout layoutPolicy="listing">
+	<CategorySupport
+		slot="support"
+		support={support}
+	/>
+	<CategoryPage {posts} {pagination} {categories} {categorySlug} {tagIndexUrl} />
+</MainGridLayout>

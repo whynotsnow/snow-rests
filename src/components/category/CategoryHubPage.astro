@@ -1,0 +1,127 @@
+---
+import PostGrid from "@components/post/PostGrid.astro";
+import type { CategoryHubPageViewModel } from "@/services/category-hub";
+import CategoryCardGrid from "./CategoryCardGrid.astro";
+
+interface Props {
+	model: CategoryHubPageViewModel;
+}
+
+const { model } = Astro.props;
+---
+
+<div
+	id="page-content"
+	class="listing-page category-hub-page ds-stack w-full"
+	style="--stack-space: var(--space-grid-gap);"
+	data-category-hub
+	data-category-hub-view={model.activeView}
+>
+	<section
+		class="category-hub-hero ds-surface-card ds-stack"
+		style="--stack-space: var(--space-cluster);"
+		aria-labelledby="category-hub-title"
+	>
+		<nav class="category-hub-tabs ds-cluster" aria-label="分类视图">
+			{
+				model.tabs.map((tab) => (
+					<a
+						href={tab.url}
+						class:list={[
+							"category-hub-tab",
+							tab.id === model.activeView &&
+								"category-hub-tab--active",
+						]}
+						aria-current={
+							tab.id === model.activeView ? "page" : undefined
+						}
+					>
+						{tab.label}
+					</a>
+				))
+			}
+		</nav>
+		<div>
+			<h1 id="category-hub-title" class="category-hub-title">
+				{model.title}
+			</h1>
+			<p class="category-hub-description">{model.description}</p>
+		</div>
+	</section>
+
+	{
+		model.activeView === "all" ? (
+			<CategoryCardGrid categories={model.categories} label="全部分类" />
+		) : (
+			<PostGrid
+				posts={model.posts}
+				id={`category-${model.activeView}-post-list`}
+			/>
+		)
+	}
+</div>
+
+<style>
+	.category-hub-page {
+		--category-hub-tab-size: var(--text-ui-size);
+		--category-hub-description-size: var(--text-meta-size);
+	}
+
+	.category-hub-hero {
+		padding: clamp(1rem, 2cqi, 1.25rem);
+	}
+
+	.category-hub-tabs {
+		--cluster-space: var(--size-2);
+	}
+
+	.category-hub-tab {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 2.25rem;
+		padding: 0.45rem 0.8rem;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-md);
+		color: var(--text-secondary);
+		font-size: var(--category-hub-tab-size);
+		font-weight: 700;
+		line-height: 1.2;
+		transition:
+			border-color var(--motion-fast) var(--motion-ease-standard),
+			color var(--motion-fast) var(--motion-ease-standard),
+			background var(--motion-fast) var(--motion-ease-standard);
+	}
+
+	.category-hub-tab:hover {
+		border-color: var(--border-strong);
+		color: var(--accent);
+	}
+
+	.category-hub-tab--active {
+		border-color: var(--accent);
+		background: var(--accent);
+		color: var(--text-on-accent);
+	}
+
+	.category-hub-tab--active:hover {
+		border-color: var(--accent);
+		color: var(--text-on-accent);
+	}
+
+	.category-hub-title {
+		color: var(--text-primary);
+		font-family: var(--font-heading);
+		font-size: var(--post-card-title-size);
+		font-weight: 800;
+		line-height: 1.25;
+		letter-spacing: 0;
+	}
+
+	.category-hub-description {
+		margin-top: 0.35rem;
+		color: var(--text-secondary);
+		font-size: var(--category-hub-description-size);
+		line-height: 1.6;
+	}
+</style>

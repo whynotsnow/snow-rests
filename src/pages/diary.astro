@@ -1,0 +1,198 @@
+---
+import MomentCard from "../components/diary/MomentCard.astro";
+import FilterTabs from "../components/filter-tabs/FilterTabs.astro";
+import { siteConfig } from "../config";
+import { getAllTags, getDiaryList } from "../data/diary";
+import I18nKey from "../i18n/i18nKey";
+import { i18n } from "../i18n/translation";
+import MainGridLayout from "../layouts/MainGridLayout.astro";
+
+if (!siteConfig.featurePages.diary) {
+	return Astro.redirect("/404/");
+}
+
+const moments = getDiaryList();
+const allTags = getAllTags();
+
+const filterTabs = [
+	{
+		value: "all",
+		label: i18n(I18nKey.albumsFilterAll),
+		count: moments.length,
+	},
+	...allTags.map((tag) => ({
+		value: tag,
+		label: tag,
+		count: moments.filter((moment) => moment.tags?.includes(tag)).length,
+	})),
+];
+
+const relativeTimeLabels = {
+	minutesAgo: i18n(I18nKey.diaryMinutesAgo),
+	hoursAgo: i18n(I18nKey.diaryHoursAgo),
+	daysAgo: i18n(I18nKey.diaryDaysAgo),
+};
+
+const title = i18n(I18nKey.diary);
+const subtitle = i18n(I18nKey.diarySubtitle);
+---
+
+<MainGridLayout title={title} description={subtitle} layoutPolicy="content">
+	<script>
+		import("../components/modules/diary/diary-client");
+	</script>
+
+	<div
+		class="flex w-full rounded-[var(--radius-large)] overflow-hidden relative min-h-32"
+	>
+		<div class="card-base z-10 relative w-full overflow-hidden">
+			<div class="px-6 sm:px-9 py-6">
+				<header class="moments-header">
+					<div class="moments-header__info">
+						<h1>{title}</h1>
+						<p>{subtitle}</p>
+					</div>
+					<div class="moments-header__stats">
+						<span>{moments.length}</span>
+						<small>{i18n(I18nKey.diaryCount)}</small>
+					</div>
+				</header>
+			</div>
+
+			<div class="px-6 sm:px-9 pt-2 pb-6">
+				{
+					moments.length > 0 && allTags.length > 0 && (
+						<div class="mb-8">
+							<FilterTabs tabs={filterTabs} dataAttr="tags" />
+						</div>
+					)
+				}
+
+				<div
+					id="diary-list"
+					class="space-y-4"
+					data-memos-api={siteConfig.diaryApiUrl || ""}
+					data-minutes-ago={relativeTimeLabels.minutesAgo}
+					data-hours-ago={relativeTimeLabels.hoursAgo}
+					data-days-ago={relativeTimeLabels.daysAgo}
+					data-timezone={String(siteConfig.timeZone)}
+				>
+					{
+						moments.map((moment, index) => (
+							<MomentCard
+								moment={moment}
+								index={index}
+								labels={relativeTimeLabels}
+								timeZone={siteConfig.timeZone}
+							/>
+						))
+					}
+				</div>
+
+				<div id="no-results" class="hidden text-center py-16">
+					<div class="moments-empty-icon text-50 mb-4" aria-hidden="true">
+						✎
+					</div>
+					<p class="moments-empty-message text-60">
+						{i18n(I18nKey.diaryNoResults)}
+					</p>
+				</div>
+
+				{
+					moments.length === 0 && (
+						<div class="text-center py-16">
+							<div class="moments-empty-icon text-50 mb-4" aria-hidden="true">
+								✎
+							</div>
+							<h2 class="moments-empty-message font-medium text-90 mb-2">
+								{i18n(I18nKey.diaryNoResults)}
+							</h2>
+						</div>
+					)
+				}
+
+				<div class="moments-tips text-center mt-8 text-75 italic">
+					{i18n(I18nKey.diaryTips)}
+				</div>
+			</div>
+		</div>
+	</div>
+</MainGridLayout>
+
+<style>
+	.moments-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		border-radius: 0.75rem;
+		padding: 1.25rem;
+		background: linear-gradient(
+			135deg,
+			var(--primary) 0%,
+			var(--primary-dark, var(--primary)) 100%
+		);
+		color: white;
+	}
+
+	.moments-header__info {
+		min-width: 0;
+	}
+
+	.moments-header h1 {
+		margin-bottom: 0.25rem;
+		font-size: var(--text-page-title-size);
+		font-weight: 700;
+		line-height: 1.15;
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+	}
+
+	.moments-header p {
+		overflow: hidden;
+		color: rgba(255, 255, 255, 0.82);
+		font-size: var(--text-ui-size);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.moments-header__stats {
+		flex-shrink: 0;
+		text-align: center;
+	}
+
+	.moments-header__stats span {
+		display: block;
+		font-size: var(--text-list-title-size);
+		font-weight: 700;
+		line-height: 1;
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+	}
+
+	.moments-header__stats small {
+		display: block;
+		margin-top: 0.25rem;
+		color: rgba(255, 255, 255, 0.72);
+		font-size: var(--text-caption-size);
+	}
+
+	.moments-empty-icon {
+		font-size: var(--text-icon-display-size);
+		line-height: 1;
+	}
+
+	.moments-empty-message {
+		font-size: var(--text-section-title-size);
+	}
+
+	.moments-tips {
+		font-size: var(--text-ui-size);
+	}
+
+	@media (width < 640px) {
+		.moments-header {
+			flex-direction: column;
+			align-items: stretch;
+			text-align: center;
+		}
+	}
+</style>

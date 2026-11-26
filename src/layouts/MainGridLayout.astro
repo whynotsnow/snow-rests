@@ -1,0 +1,102 @@
+---
+import type { MarkdownHeading } from "astro";
+import FullWallpaper from "@components/misc/FullWallpaper.astro";
+import Navbar from "@components/Navbar.astro";
+import Banner from "@/components/layout/Banner/Banner.astro";
+import MainGridContent from "@/components/layout/MainGridContent.astro";
+import { wallConfig, siteConfig } from "@/config";
+import { buildMainGridLayoutViewModel } from "@/services/layout/main-grid";
+import type { PageLayoutPolicyName } from "@/services/layout/types";
+import Layout from "./Layout.astro";
+import "@/styles/main-grid-layout.css";
+
+interface Props {
+	title?: string;
+	banner?: string;
+	description?: string;
+	lang?: string;
+	setOGTypeArticle?: boolean;
+	postSlug?: string;
+	canonicalUrl?: string;
+	headings?: MarkdownHeading[];
+	layoutPolicy?: PageLayoutPolicyName;
+}
+
+const {
+	title,
+	banner,
+	description,
+	lang,
+	setOGTypeArticle,
+	postSlug,
+	canonicalUrl,
+	headings = [],
+	layoutPolicy = "default",
+} = Astro.props;
+const viewModel = await buildMainGridLayoutViewModel({
+	config: siteConfig,
+	layoutPolicy,
+	pathname: Astro.url.pathname,
+});
+const hasSupportContent = Astro.slots.has("support");
+---
+
+<Layout
+	title={title}
+	banner={banner}
+	description={description}
+	lang={lang}
+	setOGTypeArticle={setOGTypeArticle}
+		postSlug={postSlug}
+		canonicalUrl={canonicalUrl}
+	navbarBehavior={viewModel.interaction.navbar}
+>
+	<script>
+		import "@/components/layout/main-grid-client";
+	</script>
+
+	<FullWallpaper config={wallConfig} />
+	<div
+		id="navigation-progress"
+		class="navigation-progress"
+		data-state="idle"
+		aria-hidden="true"
+	>
+		<div class="navigation-progress__indicator"></div>
+	</div>
+
+	<slot slot="head" name="head" />
+	<div
+		id="top-row"
+		class="z-50 pointer-events-none relative transition-all duration-700 mx-auto"
+		data-shell-strategy={viewModel.pageLayout.shellStrategy}
+	>
+		<div
+			id="navbar-wrapper"
+			class="pointer-events-auto sticky top-0 transition-all"
+		>
+			<Navbar
+				class="navbar__inner--container-content"
+			/>
+		</div>
+	</div>
+
+	<Banner
+		bannerImages={viewModel.bannerImages}
+		config={siteConfig.banner}
+		mobileNonHomeClass={viewModel.banner.mobileNonHomeClass}
+		shellStrategy={viewModel.pageLayout.shellStrategy}
+		showHomeText={viewModel.banner.showHomeText}
+	/>
+
+	<MainGridContent
+		headings={headings}
+		viewModel={viewModel}
+		footer={viewModel.footer}
+		hasSupportContent={hasSupportContent}
+	>
+		<slot name="support" slot="support" />
+		<slot />
+	</MainGridContent>
+
+</Layout>

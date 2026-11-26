@@ -1,0 +1,578 @@
+import { live2dCompanionConfig } from "@/config";
+import type {
+	Live2DCompanionAnchor,
+	Live2DCompanionCollapsedSnapEdge,
+	Live2DCompanionDragPointer,
+	Live2DCompanionStoredPosition,
+	Live2DWidgetConfig,
+} from "./types";
+import { defaultAvatarSrc } from "./widget-config";
+
+const collapsedDragActivationDistance = 6;
+const expressionLabels = live2dCompanionConfig.expressionMenu?.labels ?? {};
+
+type Live2DThemeTokens = Partial<{
+	accent: string;
+	border: string;
+	isDark: boolean;
+	controlSurface: string;
+	messageSurface: string;
+	shadow: string;
+	text: string;
+}>;
+
+type Live2DParentClientPoint = {
+	x: number;
+	y: number;
+};
+
+type Live2DPositionRuntime = {
+	saveAnchor: (anchor: Live2DCompanionAnchor) => void;
+	getAnchorFromRect: (rect: DOMRect) => Live2DCompanionAnchor;
+	getAnchorFromExpandedPosition: (
+		position: Live2DCompanionStoredPosition,
+	) => Live2DCompanionAnchor;
+	getAnchorFromCollapsedPreview: (
+		position: Live2DCompanionStoredPosition,
+	) => Live2DCompanionAnchor;
+	clampPosition: (
+		position: Live2DCompanionStoredPosition,
+	) => Live2DCompanionStoredPosition;
+	clampCollapsedAvatarPreviewPosition: (
+		position: Live2DCompanionStoredPosition,
+		options?: { suppressCornerSnap?: boolean },
+	) => Live2DCompanionStoredPosition;
+	getCollapsedAvatarPreviewSnapEdge: (
+		position: Live2DCompanionStoredPosition,
+	) => Live2DCompanionCollapsedSnapEdge | undefined;
+};
+
+type Live2DCompanionRuntimeOptions = {
+	widgetConfig: Live2DWidgetConfig;
+	frameHeight: number;
+	getIframeEl: () => HTMLIFrameElement | undefined;
+	getRootEl: () => HTMLDivElement | undefined;
+	getExpressionPanelEl: () => HTMLDivElement | undefined;
+	getDisposed: () => boolean;
+	getFrameMounted: () => boolean;
+	setFrameMounted: (mounted: boolean) => void;
+	setLoaded: (loaded: boolean) => void;
+	getCollapsed: () => boolean;
+	setCollapsed: (collapsed: boolean) => void;
+	getExpressionPanelOpen: () => boolean;
+	setExpressionPanelOpenState: (open: boolean) => void;
+	getAvailableExpressions: () => string[];
+	setAvailableExpressions: (expressions: string[]) => void;
+	setExpressionPanelAnchor: (anchor?: { x: number; y: number }) => void;
+	setActiveAvatarSrc: (src: string) => void;
+	setDragReady: (ready: boolean) => void;
+	getDragging: () => boolean;
+	setDragging: (dragging: boolean) => void;
+	setStoredPosition: (
+		position: Live2DCompanionStoredPosition | undefined,
+	) => void;
+	getStoredPosition: () => Live2DCompanionStoredPosition | undefined;
+	getAnchor: () => Live2DCompanionAnchor | undefined;
+	setAnchor: (anchor: Live2DCompanionAnchor | undefined) => void;
+	getCollapsedAvatarPreviewPosition: () =>
+		| Live2DCompanionStoredPosition
+		| undefined;
+	setCollapsedAvatarPreviewPosition: (
+		position: Live2DCompanionStoredPosition | undefined,
+	) => void;
+	getCollapsedAvatarDragging: () => boolean;
+	setCollapsedAvatarDragging: (dragging: boolean) => void;
+	setCollapsedAvatarSnapping: (snapping: boolean) => void;
+	position: Live2DPositionRuntime;
+	commitView: () => void;
+};
+
+export type Live2DCompanionRuntime = {
+	postToFrame: (message: Record<string, unknown>) => void;
+	postTheme: () => void;
+	closeExpressionPanel: () => void;
+	toggleExpressionPanel: (anchor?: { x: number; y: number }) => void;
+	getExpressionLabel: (name: string) => string;
+	handleExpressionControlMouseLeave: (event: MouseEvent) => void;
+	selectExpression: (name: string) => void;
+	scheduleInit: () => void;
+	queueFrameMount: () => void;
+	syncFramePointerFromEvent: (event?: MouseEvent) => void;
+	startDrag: (point: Live2DCompanionDragPointer) => void;
+	updateDrag: (point: Live2DCompanionDragPointer) => void;
+	updateDragFromClientPoint: (clientX: number, clientY: number) => void;
+	endDrag: () => void;
+	beginCollapsedAvatarPointer: (event: PointerEvent) => void;
+	updateCollapsedAvatarDrag: (event: PointerEvent) => void;
+	endCollapsedAvatarPointer: (
+		event: PointerEvent,
+		expandCompanion: (event?: MouseEvent) => void,
+	) => void;
+	cancelCollapsedAvatarPointer: (event: PointerEvent) => void;
+	handleCollapsedAvatarClick: (
+		event: MouseEvent,
+		expandCompanion: (event?: MouseEvent) => void,
+	) => void;
+	applyLoadedMessage: (event: MessageEvent) => void;
+	applyModelStateMessage: (event: MessageEvent) => void;
+	applyExpressionsMessage: (event: MessageEvent) => void;
+	cleanupFrameTimers: () => void;
+};
+
+export function createLive2DCompanionRuntime(
+	options: Live2DCompanionRuntimeOptions,
+): Live2DCompanionRuntime {
+	let pendingInit: number | undefined;
+	let pendingFrameMount: number | undefined;
+	let dragOffset = { x: 0, y: 0 };
+	let collapsedAvatarPointerId: number | undefined;
+	let collapsedAvatarDragStarted = false;
+	let collapsedAvatarDragStart = { x: 0, y: 0 };
+	let collapsedAvatarDragOffset = { x: 0, y: 0 };
+	let collapsedAvatarSnapEdge: Live2DCompanionCollapsedSnapEdge | undefined;
+	let collapsedAvatarSnapTimer: number | undefined;
+	let suppressCollapsedAvatarClick = false;
+
+	function postToFrame(message: Record<string, unknown>): void {
+		// 父页面只通过 postMessage 与 iframe 通信，避免跨边界直接操作 Live2D 渲染 DOM。
+		const iframeEl = options.getIframeEl();
+		if (!iframeEl?.contentWindow) return;
+		iframeEl.contentWindow.postMessage(message, "*");
+	}
+
+	function readThemeTokens(): Live2DThemeTokens {
+		if (live2dCompanionConfig.ui?.themeMode === "custom") return {};
+		// iframe 内部不能直接消费站点 CSS token，由父页面读取后同步一份稳定主题快照。
+		const styles = window.getComputedStyle(document.documentElement);
+		const read = (name: string) => styles.getPropertyValue(name).trim();
+		const isDark = document.documentElement.classList.contains("dark");
+		return {
+			accent: read("--accent"),
+			border: read("--border-default"),
+			isDark,
+			controlSurface: isDark
+				? "rgb(30 30 30 / 86%)"
+				: "rgb(255 255 255 / 88%)",
+			messageSurface: isDark
+				? "rgb(24 24 24 / 88%)"
+				: "rgb(255 255 255 / 90%)",
+			shadow: read("--shadow-raised"),
+			text: read("--text-primary"),
+		};
+	}
+
+	function postTheme(): void {
+		postToFrame({
+			type: "live2d-companion-theme",
+			theme: readThemeTokens(),
+		});
+	}
+
+	function getExpressionLabel(name: string): string {
+		return expressionLabels[name] ?? name;
+	}
+
+	function postExpressionPanelState(
+		open = options.getExpressionPanelOpen(),
+	): void {
+		postToFrame({
+			type: "live2d-companion-expression-panel-state",
+			open,
+		});
+	}
+
+	function setExpressionPanelOpen(open: boolean): void {
+		options.setExpressionPanelOpenState(open);
+		postExpressionPanelState(open);
+		options.commitView();
+	}
+
+	function closeExpressionPanel(): void {
+		setExpressionPanelOpen(false);
+	}
+
+	function toggleExpressionPanel(anchor?: { x: number; y: number }): void {
+		if (options.getAvailableExpressions().length === 0) return;
+		if (anchor) options.setExpressionPanelAnchor(anchor);
+		setExpressionPanelOpen(!options.getExpressionPanelOpen());
+	}
+
+	function handleExpressionControlMouseLeave(event: MouseEvent): void {
+		if (!options.getExpressionPanelOpen()) return;
+		const relatedTarget = event.relatedTarget;
+		const iframeEl = options.getIframeEl();
+		if (
+			relatedTarget instanceof Node &&
+			(relatedTarget === iframeEl ||
+				options.getExpressionPanelEl()?.contains(relatedTarget))
+		) {
+			return;
+		}
+		closeExpressionPanel();
+	}
+
+	function selectExpression(name: string): void {
+		postToFrame({
+			type: "live2d-companion-command",
+			command: { type: "expression", name },
+		});
+	}
+
+	function postInit(): void {
+		if (!options.getIframeEl()?.contentWindow) return;
+		postToFrame({
+			type: "l2d-init",
+			config: {
+				...options.widgetConfig,
+				theme: readThemeTokens(),
+			},
+		});
+	}
+
+	function scheduleInit(): void {
+		window.clearTimeout(pendingInit);
+		const idleWindow = window as Window & {
+			requestIdleCallback?: (
+				callback: IdleRequestCallback,
+				options?: IdleRequestOptions,
+			) => number;
+		};
+		const run = (): void => {
+			pendingInit = window.setTimeout(postInit, 0);
+		};
+
+		// Live2D 初始化较重，优先让首屏渲染完成；timeout 保证空闲回调不可用时仍会启动。
+		if (idleWindow.requestIdleCallback) {
+			idleWindow.requestIdleCallback(run, { timeout: 2000 });
+		} else {
+			pendingInit = window.setTimeout(postInit, 500);
+		}
+	}
+
+	function bindFrameAfterRender(): void {
+		const iframeEl = options.getIframeEl();
+		if (options.getDisposed() || !iframeEl) return;
+		iframeEl.addEventListener("load", scheduleInit);
+		scheduleInit();
+	}
+
+	function mountFrame(): void {
+		if (options.getDisposed() || options.getFrameMounted()) return;
+		options.setFrameMounted(true);
+		options.setLoaded(false);
+		options.commitView();
+		window.setTimeout(bindFrameAfterRender, 0);
+	}
+
+	function queueFrameMount(): void {
+		window.clearTimeout(pendingFrameMount);
+		pendingFrameMount = window.setTimeout(() => {
+			mountFrame();
+		}, 0);
+	}
+
+	function syncFramePointerFromEvent(event?: MouseEvent): void {
+		const iframeEl = options.getIframeEl();
+		if (!event || !iframeEl) return;
+		const rect = iframeEl.getBoundingClientRect();
+		postToFrame({
+			type: "live2d-companion-sync-pointer",
+			point: {
+				x: event.clientX - rect.left,
+				y: event.clientY - rect.top,
+			},
+		});
+	}
+
+	function getParentClientPoint(
+		point: Live2DCompanionDragPointer,
+	): Live2DParentClientPoint | undefined {
+		const rect = options.getIframeEl()?.getBoundingClientRect();
+		if (!rect) return undefined;
+		return {
+			x: rect.left + point.x,
+			y: rect.top + point.y,
+		};
+	}
+
+	function startDrag(point: Live2DCompanionDragPointer): void {
+		const clientPoint = getParentClientPoint(point);
+		const rect = options.getRootEl()?.getBoundingClientRect();
+		if (!clientPoint || !rect) return;
+		closeExpressionPanel();
+		options.setDragging(true);
+		options.setDragReady(true);
+		// 展开态拖拽保存锚点而非裸坐标，窗口尺寸变化后仍能按相对位置恢复。
+		dragOffset = {
+			x: clientPoint.x - rect.left,
+			y: clientPoint.y - rect.top,
+		};
+		options.setStoredPosition({
+			left: rect.left,
+			top: rect.top,
+		});
+		postToFrame({ type: "live2d-companion-drag-state", dragging: true });
+		options.commitView();
+	}
+
+	function updateDragFromClientPoint(clientX: number, clientY: number): void {
+		if (!options.getDragging()) return;
+		options.setStoredPosition(
+			options.position.clampPosition({
+				left: clientX - dragOffset.x,
+				top: clientY - dragOffset.y,
+			}),
+		);
+		options.commitView();
+	}
+
+	function updateDrag(point: Live2DCompanionDragPointer): void {
+		const clientPoint = getParentClientPoint(point);
+		if (!clientPoint) return;
+		updateDragFromClientPoint(clientPoint.x, clientPoint.y);
+	}
+
+	function endDrag(): void {
+		if (!options.getDragging()) return;
+		options.setDragging(false);
+		const storedPosition = options.getStoredPosition();
+		if (storedPosition) {
+			const position = options.position.clampPosition(storedPosition);
+			options.setStoredPosition(position);
+			const anchor =
+				options.position.getAnchorFromExpandedPosition(position);
+			options.setAnchor(anchor);
+			options.position.saveAnchor(anchor);
+		}
+		postToFrame({ type: "live2d-companion-drag-state", dragging: false });
+		options.commitView();
+	}
+
+	function setCollapsedAvatarSnapEdge(
+		edge: Live2DCompanionCollapsedSnapEdge | undefined,
+	): void {
+		if (edge === collapsedAvatarSnapEdge) return;
+		collapsedAvatarSnapEdge = edge;
+		window.clearTimeout(collapsedAvatarSnapTimer);
+		if (!edge) {
+			options.setCollapsedAvatarSnapping(false);
+			return;
+		}
+		options.setCollapsedAvatarSnapping(true);
+		collapsedAvatarSnapTimer = window.setTimeout(() => {
+			options.setCollapsedAvatarSnapping(false);
+			options.commitView();
+		}, 320);
+	}
+
+	function beginCollapsedAvatarPointer(event: PointerEvent): void {
+		if (!options.getCollapsed() || event.button !== 0) return;
+		event.preventDefault();
+		const rect = options.getRootEl()?.getBoundingClientRect();
+		if (!rect) return;
+		collapsedAvatarPointerId = event.pointerId;
+		options.setCollapsedAvatarDragging(true);
+		collapsedAvatarDragStarted = false;
+		collapsedAvatarDragStart = {
+			x: event.clientX,
+			y: event.clientY,
+		};
+		collapsedAvatarDragOffset = {
+			x: event.clientX - rect.left,
+			y: event.clientY - rect.top,
+		};
+		options.setAnchor(
+			options.getAnchor() ?? options.position.getAnchorFromRect(rect),
+		);
+		const previewPosition =
+			options.position.clampCollapsedAvatarPreviewPosition(
+				{
+					left: rect.left,
+					top: rect.top,
+				},
+				{ suppressCornerSnap: true },
+			);
+		setCollapsedAvatarSnapEdge(undefined);
+		options.setCollapsedAvatarPreviewPosition(previewPosition);
+		if (event.currentTarget instanceof HTMLElement) {
+			try {
+				event.currentTarget.setPointerCapture(event.pointerId);
+			} catch {
+				collapsedAvatarPointerId = undefined;
+				options.setCollapsedAvatarDragging(false);
+			}
+		}
+		options.commitView();
+	}
+
+	function updateCollapsedAvatarDrag(event: PointerEvent): void {
+		if (
+			!options.getCollapsedAvatarDragging() ||
+			event.pointerId !== collapsedAvatarPointerId
+		) {
+			return;
+		}
+		// collapsed avatar 只有超过阈值才进入拖拽，保留普通点击展开的手感。
+		const movement = Math.hypot(
+			event.clientX - collapsedAvatarDragStart.x,
+			event.clientY - collapsedAvatarDragStart.y,
+		);
+		if (
+			!collapsedAvatarDragStarted &&
+			movement < collapsedDragActivationDistance
+		) {
+			return;
+		}
+		collapsedAvatarDragStarted = true;
+		const rawPosition = {
+			left: event.clientX - collapsedAvatarDragOffset.x,
+			top: event.clientY - collapsedAvatarDragOffset.y,
+		};
+		const previewPosition =
+			options.position.clampCollapsedAvatarPreviewPosition(rawPosition, {
+				suppressCornerSnap: true,
+			});
+		setCollapsedAvatarSnapEdge(undefined);
+		options.setCollapsedAvatarPreviewPosition(previewPosition);
+		event.preventDefault();
+		options.commitView();
+	}
+
+	function endCollapsedAvatarPointer(
+		event: PointerEvent,
+		expandCompanion: (event?: MouseEvent) => void,
+	): void {
+		if (
+			!options.getCollapsedAvatarDragging() ||
+			event.pointerId !== collapsedAvatarPointerId
+		) {
+			return;
+		}
+		if (event.currentTarget instanceof HTMLElement) {
+			try {
+				event.currentTarget.releasePointerCapture(event.pointerId);
+			} catch {
+				// Pointer capture may already be released by the browser.
+			}
+		}
+		options.setCollapsedAvatarDragging(false);
+		collapsedAvatarPointerId = undefined;
+		const previewPosition = options.getCollapsedAvatarPreviewPosition();
+		// 拖拽结束只提交预览位置；未进入拖拽的 pointerup 仍视为展开点击。
+		if (collapsedAvatarDragStarted && previewPosition) {
+			setCollapsedAvatarSnapEdge(
+				options.position.getCollapsedAvatarPreviewSnapEdge(
+					previewPosition,
+				),
+			);
+			const anchor =
+				options.position.getAnchorFromCollapsedPreview(previewPosition);
+			options.setAnchor(anchor);
+			options.position.saveAnchor(anchor);
+			options.setCollapsedAvatarPreviewPosition(undefined);
+			suppressCollapsedAvatarClick = true;
+			window.setTimeout(() => {
+				suppressCollapsedAvatarClick = false;
+			}, 0);
+			event.preventDefault();
+			options.commitView();
+			return;
+		}
+		options.setCollapsedAvatarPreviewPosition(undefined);
+		options.commitView();
+		expandCompanion(event);
+	}
+
+	function cancelCollapsedAvatarPointer(event: PointerEvent): void {
+		if (
+			!options.getCollapsedAvatarDragging() ||
+			event.pointerId !== collapsedAvatarPointerId
+		) {
+			return;
+		}
+		options.setCollapsedAvatarDragging(false);
+		collapsedAvatarPointerId = undefined;
+		collapsedAvatarDragStarted = false;
+		setCollapsedAvatarSnapEdge(undefined);
+		options.setCollapsedAvatarPreviewPosition(undefined);
+		options.commitView();
+	}
+
+	function handleCollapsedAvatarClick(
+		event: MouseEvent,
+		expandCompanion: (event?: MouseEvent) => void,
+	): void {
+		if (suppressCollapsedAvatarClick) {
+			event.preventDefault();
+			return;
+		}
+		if (options.getCollapsed()) expandCompanion(event);
+	}
+
+	function applyLoadedMessage(event: MessageEvent): void {
+		const iframeEl = options.getIframeEl();
+		if (!iframeEl) return;
+		const height =
+			typeof event.data.contentHeight === "number"
+				? event.data.contentHeight
+				: 500;
+		iframeEl.style.height = `${Math.min(height, options.frameHeight)}px`;
+		options.setLoaded(true);
+		options.commitView();
+	}
+
+	function applyModelStateMessage(event: MessageEvent): void {
+		options.setActiveAvatarSrc(
+			typeof event.data.avatar === "string" && event.data.avatar
+				? event.data.avatar
+				: defaultAvatarSrc,
+		);
+		options.commitView();
+	}
+
+	function applyExpressionsMessage(event: MessageEvent): void {
+		options.setAvailableExpressions(
+			Array.isArray(event.data.expressions)
+				? event.data.expressions.filter(
+						(name: unknown): name is string =>
+							typeof name === "string",
+					)
+				: [],
+		);
+		closeExpressionPanel();
+		options.commitView();
+	}
+
+	function cleanupFrameTimers(): void {
+		window.clearTimeout(pendingInit);
+		window.clearTimeout(pendingFrameMount);
+		window.clearTimeout(collapsedAvatarSnapTimer);
+		options.getIframeEl()?.removeEventListener("load", scheduleInit);
+	}
+
+	return {
+		postToFrame: postToFrame,
+		postTheme: postTheme,
+		closeExpressionPanel: closeExpressionPanel,
+		toggleExpressionPanel: toggleExpressionPanel,
+		getExpressionLabel: getExpressionLabel,
+		handleExpressionControlMouseLeave: handleExpressionControlMouseLeave,
+		selectExpression: selectExpression,
+		scheduleInit: scheduleInit,
+		queueFrameMount: queueFrameMount,
+		syncFramePointerFromEvent: syncFramePointerFromEvent,
+		startDrag: startDrag,
+		updateDrag: updateDrag,
+		updateDragFromClientPoint: updateDragFromClientPoint,
+		endDrag: endDrag,
+		beginCollapsedAvatarPointer: beginCollapsedAvatarPointer,
+		updateCollapsedAvatarDrag: updateCollapsedAvatarDrag,
+		endCollapsedAvatarPointer: endCollapsedAvatarPointer,
+		cancelCollapsedAvatarPointer: cancelCollapsedAvatarPointer,
+		handleCollapsedAvatarClick: handleCollapsedAvatarClick,
+		applyLoadedMessage: applyLoadedMessage,
+		applyModelStateMessage: applyModelStateMessage,
+		applyExpressionsMessage: applyExpressionsMessage,
+		cleanupFrameTimers: cleanupFrameTimers,
+	};
+}

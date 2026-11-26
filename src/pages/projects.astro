@@ -1,0 +1,21 @@
+---
+import ProjectsPage from "@/components/projects/ProjectsPage.astro";
+import "@/components/projects/projects.css";
+import { siteConfig } from "@/config";
+import MainGridLayout from "@/layouts/MainGridLayout.astro";
+import { buildProjectsPageModel } from "@/services/projects";
+
+if (!siteConfig.featurePages.projects) {
+	return Astro.redirect("/404/");
+}
+
+const projectsPageModel = buildProjectsPageModel();
+---
+
+<MainGridLayout
+	title={projectsPageModel.title}
+	description={projectsPageModel.subtitle}
+	layoutPolicy="content"
+>
+	<ProjectsPage model={projectsPageModel} />
+</MainGridLayout>

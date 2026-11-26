@@ -1,0 +1,121 @@
+# 文档中心
+
+这里是 `Snow Rests` 的项目文档入口。项目早期源自 Mizuki 8.2，但当前已独立维护。正式说明是 `Where thoughts settle and stories remain.`（雪憩，让思绪沉淀，让故事留下）。
+
+文档按读者拆分：
+
+- `developers/`：面向开发者和内容维护者，使用中文编写。
+- `agents/`：面向 AI coding agent，使用英文编写。
+- `assets/`：文档图片、编辑器静态资源等附属资产。
+
+## 开发者文档
+
+| 文档 | 说明 |
+| --- | --- |
+| [开发者文档索引](./developers/README.md) | 中文开发者文档总入口。 |
+| [项目架构](./developers/architecture.md) | 项目目录、内容管线、路由、配置和扩展原则。 |
+| [Design System](./developers/design-system.md) | 视觉 token、Theme、Pattern、兼容层和治理规则。 |
+| [开发工作流](./developers/development.md) | 环境、命令、构建、检查和常用任务。 |
+| [测试策略](./developers/testing.md) | 按改动影响面选择测试、测试分层和全量回归升级条件。 |
+| [Codex 提示音](./developers/codex-sound-cues.md) | 本机 Codex 提示音预览、配置和事件说明。 |
+| [内容编写指南](./developers/content-guide.md) | 文章 schema、frontmatter、分类标签、草稿和资源规则。 |
+| [分类管理](./developers/category-management.md) | 分类新增、展示资产、Tag 治理、路由验证和数据库迁移边界。 |
+| [配置说明](./developers/configuration.md) | 站点配置、环境变量、特色页面和 URL 工具。 |
+| [维护指南](./developers/maintenance.md) | 定期检查、依赖更新、生成文件和高风险区域。 |
+| [项目来源与维护边界](./developers/project-lineage.md) | Mizuki 历史来源、许可证边界和独立维护原则。 |
+| [Live2D Companion 维护指南](./developers/live2d-companion-maintenance.md) | 看板娘组件架构、配置、iframe、拖拽、模型和验证规则。 |
+| [Twikoo 评论组件维护方案](./developers/twikoo-maintenance.md) | Twikoo vendored CSS、主题变量桥接、升级和验证流程。 |
+| [内容分离](./developers/content-separation.md) | 外部内容仓库配置、私有仓库和故障排查。 |
+| [内容仓库结构](./developers/content-repository.md) | 分离内容仓库的推荐目录和写作规范。 |
+| [内容迁移指南](./developers/migration-guide.md) | 从单仓库迁移到分离内容仓库。 |
+| [部署指南](./developers/deployment.md) | Vercel 等静态平台部署说明。 |
+| [自动构建触发](./developers/auto-build-trigger.md) | 内容更新后触发重新部署的快速参考。 |
+
+## Agent 文档
+
+| 文档 | 说明 |
+| --- | --- |
+| [Agent Workspace Spec](../spec/agent-workspace/SPEC.md) | Agent 工作区文件格式、合规等级、上下文解析与版本规则。 |
+| [Agent Documentation](./agents/README.md) | English documentation index for AI agents. |
+| [Agent Workflow](./agents/workflow.md) | English workflow for AI agents: inspect, modify, validate, and hand off work. |
+| [Testing Strategy](./agents/testing-strategy.md) | English impact-based test selection and escalation contract for agents. |
+| [Project Map](./agents/project-map.md) | English architecture map optimized for AI agents. |
+| [Runtime Playbook](./agents/runtime-playbook.md) | English playbook for known runtime and tooling pitfalls. |
+| [Runtime Requirements](./agents/runtime-requirements.md) | English execution capability contract and local profile resolution order. |
+| [Sound Cues](./agents/sound-cues.md) | English local cue events, allowed usage, forbidden cases, and deployment approval behavior. |
+| [Disclosure Policy](./agents/disclosure-policy.md) | English policy for public Agent Workspace Spec knowledge and ignored runtime state. |
+| [Failure Index](./agents/failure-index.md) | English index of clustered failure patterns. |
+| [Execution Log](./agents/execution-log.md) | English log for reusable AI-assisted task learning. |
+| [Memory](./agents/memory.json) | Structured persistent memory for Agent Workspace Spec. |
+
+## 推荐阅读路径
+
+### 修改代码
+
+1. 阅读 [项目架构](./developers/architecture.md)。
+2. 阅读相关专题文档。
+3. 使用 `git status --short`、`rg --files` 和目标文件读取命令确认当前上下文。
+4. 变更后运行 `pnpm check` 或更具体的校验命令。
+
+### 编写内容
+
+1. 阅读 [内容编写指南](./developers/content-guide.md)。
+2. 使用 `pnpm new-post -- <filename>` 创建文章。
+3. 保持分类和标签命名稳定。
+
+### 配置站点
+
+1. 阅读 [配置说明](./developers/configuration.md)。
+2. 修改 `src/config.ts`。
+3. 配置结构变化时同步更新 `src/types/config.ts`。
+
+### 交给 Agent 维护
+
+1. Agent 先读 [AGENTS.md](../AGENTS.md)。
+2. Agent 再读 [Agent Workflow](./agents/workflow.md) 和 [Project Map](./agents/project-map.md)。
+3. 涉及用户或开发者行为的文档变更，仍需更新 `developers/` 下的中文文档。
+
+## 目录结构
+
+```text
+docs/
+├── README.md
+├── developers/
+│   ├── README.md
+│   ├── architecture.md
+│   ├── development.md
+│   ├── codex-sound-cues.md
+│   ├── content-guide.md
+│   ├── configuration.md
+│   ├── maintenance.md
+│   ├── live2d-companion-maintenance.md
+│   ├── content-separation.md
+│   ├── content-repository.md
+│   ├── migration-guide.md
+│   ├── deployment.md
+│   └── auto-build-trigger.md
+├── agents/
+│   ├── README.md
+│   ├── workflow.md
+│   ├── project-map.md
+│   ├── runtime-playbook.md
+│   ├── runtime-requirements.md
+│   ├── sound-cues.md
+│   ├── disclosure-policy.md
+│   ├── failure-index.md
+│   ├── execution-log.md
+│   └── memory.json
+└── assets/
+    ├── editor/
+    └── image/
+```
+
+Agent Workspace Spec 的规范性文件、JSON Schema 和公开示例位于 `spec/agent-workspace/`；项目实例 manifest 位于 `.agent-workspace/manifest.json`，本地 profile 位于被 Git 忽略的 `.agent-workspace/local/`。
+
+## 维护规则
+
+新增文档前先判断读者：
+
+- 面向人类开发者、内容维护者、部署维护者：放入 `docs/developers/`，使用中文。
+- 面向 AI Agent 的操作规则、上下文地图、执行流程：放入 `docs/agents/`，使用英文。
+- 图片、HTML/CSS/JS 辅助文件等资产：放入 `docs/assets/`。

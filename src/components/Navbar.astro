@@ -1,0 +1,212 @@
+---
+import { Icon } from "astro-icon/components";
+import { navBarConfig, siteConfig } from "../config";
+import { LinkPresets } from "../constants/link-presets";
+import { LinkPreset, type NavBarLink } from "../types/config";
+import { url } from "../utils/url";
+import Search from "@/components/modules/shell-controls/Search.svelte";
+import MobileTOC from "@/components/post-toc/MobileTOC.svelte";
+import DropdownMenu from "./navigation/DropdownMenu.astro";
+import NavMenuPanel from "./navigation/NavMenuPanel.astro";
+import ActivityCenter from "@/components/modules/activity-center/ActivityCenter.astro";
+
+const className = Astro.props.class;
+
+// 获取导航栏透明模式配置
+const navbarTransparentMode =
+	siteConfig.banner?.navbar?.transparentMode || "semi";
+
+// 检查是否为首页
+const isHomePage = Astro.url.pathname === "/" || Astro.url.pathname === "";
+
+const links: NavBarLink[] = navBarConfig.links.map(
+	(item: NavBarLink | LinkPreset): NavBarLink => {
+		if (typeof item === "number") {
+			return LinkPresets[item];
+		}
+		return item;
+	},
+);
+
+const rawLogo = siteConfig.navbarTitle?.logo || "/assets/home/default-logo.png";
+const logoSrc = rawLogo.match(/^(http|https|\/\/)/) ? rawLogo : url(rawLogo);
+
+const rawIcon = siteConfig.navbarTitle?.icon || "/assets/home/home.png";
+const iconSrc = rawIcon.match(/^(http|https|\/\/)/) ? rawIcon : url(rawIcon);
+---
+<div id="navbar" class="z-50 onload-animation group" data-transparent-mode={navbarTransparentMode} data-is-home={isHomePage}>
+    <div class="absolute h-8 left-0 right-0 -top-8 bg-(--card-bg) transition"></div> <!-- used for onload animation -->
+	    <div class:list={[
+			className,
+			"navbar__inner overflow-visible! mx-auto flex items-center justify-between px-4",
+		]}>
+		<a href={url('/')} class="navbar__brand btn-plain scale-animation rounded-(--navbar-control-radius) h-10 md:h-13 md:in-[.enable-banner]:h-10 md:in-[.enable-banner]:group-[.scrolled]:h-13 px-5 font-bold active:scale-95 shrink-0 transition-all duration-300">
+			<div class="navbar__brand-content flex flex-row items-center text-md">
+				{/* 使用navbarTitle配置或默认配置 */}
+                {siteConfig.navbarTitle ? (
+                    siteConfig.navbarTitle.mode === "logo" ? (
+                        <img src={logoSrc} alt={siteConfig.navbarTitle.text} class="h-10 md:h-13 md:in-[.enable-banner]:h-10 md:in-[.enable-banner]:group-[.scrolled]:h-13 max-w-full object-contain transition-all duration-300" loading="eager" decoding="async" fetchpriority="high" />
+                    ) : (
+                        <>
+                            <img src={iconSrc} alt="" class="h-7 w-7 mr-2 object-contain" loading="eager" decoding="async" />
+                            <span>{siteConfig.navbarTitle.text}</span>
+                        </>
+                    )
+                ) : (
+                    <>
+                        <Icon name="material-symbols:home-pin-outline" class="text-[1.75rem] mr-2" />
+                        <span>{siteConfig.title}</span>
+                    </>
+                )}
+            </div>
+        </a>
+		<div id="navbar-links-container" class="navbar__links hidden md:flex items-center transition-opacity duration-300">
+            {links.map((l) => {
+                return <DropdownMenu link={l} />;
+            })}
+        </div>
+		<div class="navbar__actions flex items-center">
+            <div id="search-container">
+                <Search client:only="svelte"></Search>
+            </div>
+            <ActivityCenter />
+            {siteConfig.toc.enable && <MobileTOC client:only="svelte"></MobileTOC>}
+            <button aria-label="Menu" name="Nav Menu" class="btn-plain scale-animation rounded-(--navbar-control-radius) w-11 h-11 active:scale-90 md:hidden!" id="nav-menu-switch">
+                <Icon name="material-symbols:unfold-more" class="text-[1.25rem]"></Icon>
+            </button>
+        </div>
+        <NavMenuPanel links={links}></NavMenuPanel>
+    </div>
+</div>
+
+<script>
+	const searchContainer = document.getElementById("search-container");
+	const navbarLinksContainer = document.getElementById("navbar-links-container");
+	const navbarRoot = document.getElementById("navbar");
+
+	const normalizeCurrentPage = (href: string) => {
+		const targetUrl = new URL(href, window.location.href);
+		const pathname = targetUrl.pathname.replace(/\/+$/, "") || "/";
+		return `${targetUrl.origin}${pathname}${targetUrl.search}`;
+	};
+
+	navbarRoot?.addEventListener("click", (event) => {
+		const target = event.target instanceof Element ? event.target : null;
+		const link = target?.closest("a[href]");
+		if (!(link instanceof HTMLAnchorElement) || !navbarRoot.contains(link)) {
+			return;
+		}
+		if (event.detail === 0 || link.target || link.hasAttribute("download")) return;
+
+		const targetPage = normalizeCurrentPage(link.href);
+		const currentPage = normalizeCurrentPage(window.location.href);
+		if (targetPage === currentPage) {
+			link.blur();
+		}
+	});
+
+	if (searchContainer && navbarLinksContainer) {
+		// 鼠标移入/触摸开始时隐藏导航链接
+		const hideLinks = () => {
+			if (window.matchMedia("(min-width: 1280px)").matches && window.matchMedia("(hover: hover)").matches) {
+				navbarLinksContainer.style.opacity = "0";
+			}
+		};
+
+		// 鼠标移出/触摸结束时显示导航链接
+		const showLinks = () => {
+			const navbar = document.getElementById("navbar");
+			if (navbar && !navbar.classList.contains("is-searching")) {
+				navbarLinksContainer.style.opacity = "1";
+			}
+		};
+
+		searchContainer.addEventListener("mouseenter", hideLinks);
+		searchContainer.addEventListener("mouseleave", showLinks);
+
+		// 移动端/触摸屏支持
+		searchContainer.addEventListener("touchstart", hideLinks, { passive: true });
+		searchContainer.addEventListener("touchend", showLinks);
+
+		// 监听 navbar 的 class 变化，当搜索框折叠时确保链接显示
+		const navbar = document.getElementById("navbar");
+		if (navbar) {
+			const observer = new MutationObserver((mutations) => {
+				mutations.forEach((mutation) => {
+					if (mutation.type === "attributes" && mutation.attributeName === "class") {
+						if (!navbar.classList.contains("is-searching")) {
+							// 搜索框已折叠，如果此时鼠标不在搜索容器内，强制显示链接
+							if (!searchContainer.matches(':hover')) {
+								showLinks();
+							}
+						}
+					}
+				});
+			});
+			observer.observe(navbar, { attributes: true });
+		}
+	}
+
+// 为semifull模式添加滚动检测逻辑
+function initSemifullScrollDetection() {
+    const navbar = document.getElementById('navbar');
+    if (!navbar) return;
+    
+    // 移除之前的滚动事件监听器（如果存在）
+    if (window.semifullScrollHandler) {
+        window.removeEventListener('scroll', window.semifullScrollHandler);
+    }
+    
+    const behavior = document
+        .getElementById('swup-container')
+        ?.getAttribute('data-navbar-behavior');
+    const usesBannerScrollState = behavior === 'banner-aware';
+
+    // Feature pages without a visible Banner keep the compact scrolled state.
+    if (!usesBannerScrollState) {
+        navbar.classList.add('scrolled');
+        return;
+    }
+    
+    let ticking = false;
+    
+    function updateNavbarState() {
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const threshold = 50; // 滚动阈值，可以根据需要调整
+        
+        if (navbar && scrollTop > threshold) {
+            navbar.classList.add('scrolled');
+        } else if (navbar) {
+            navbar.classList.remove('scrolled');
+        }
+        
+        ticking = false;
+    }
+    
+    function requestTick() {
+        if (!ticking) {
+            requestAnimationFrame(updateNavbarState);
+            ticking = true;
+        }
+    }
+    
+    // 保存新的事件处理器引用
+    window.semifullScrollHandler = requestTick;
+    
+    // 监听滚动事件
+    window.addEventListener('scroll', requestTick, { passive: true });
+    
+    // 初始化状态
+    updateNavbarState();
+}
+
+// 将函数暴露到全局对象，供页面切换时调用
+window.initSemifullScrollDetection = initSemifullScrollDetection;
+
+// 页面加载完成后初始化滚动检测
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initSemifullScrollDetection);
+} else {
+    initSemifullScrollDetection();
+}
+</script>

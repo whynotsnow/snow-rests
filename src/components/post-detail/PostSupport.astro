@@ -1,0 +1,126 @@
+---
+import type { MarkdownHeading } from "astro";
+import { Icon } from "astro-icon/components";
+import TOC from "@components/post-toc/TableOfContents.astro";
+import GlobalDiscoveryCard from "@components/support/GlobalDiscoveryCard.astro";
+import type { PostDetailPageProps } from "@/services/post-detail/types";
+import type { TocItem } from "@components/post-toc/toc-data";
+
+interface Props {
+	headings: MarkdownHeading[];
+	tocItems: TocItem[];
+	support: PostDetailPageProps["support"];
+	deferTocHeadings?: boolean;
+}
+
+const { headings, tocItems, support, deferTocHeadings = false } = Astro.props;
+const hasHeadings = headings.length > 0;
+---
+
+<aside class="post-support ds-stack" aria-label="文章上下文">
+	{
+		hasHeadings && (
+			<section class="post-support__panel post-support__toc ds-surface-card">
+				<h2 class="post-support__heading">
+					<Icon name="material-symbols:format-list-bulleted-rounded" />
+					文章目录
+				</h2>
+				<div class="post-support__toc-body">
+					<TOC items={tocItems} deferHeadings={deferTocHeadings} />
+				</div>
+			</section>
+		)
+	}
+
+	{
+		support.discoveryCards.map((card) => (
+			<GlobalDiscoveryCard card={card} />
+		))
+	}
+</aside>
+
+<style>
+	.post-support {
+		--stack-space: var(--space-grid-gap);
+		--post-support-toc-height: min(
+			24rem,
+			calc(100dvh - var(--main-content-offset) - var(--space-grid-gap))
+		);
+		--post-support-heading-size: var(--text-ui-emphasis-size);
+		--post-support-heading-icon-size: var(--text-icon-inline-size);
+		position: sticky;
+		top: var(--main-content-offset);
+		width: 100%;
+		align-items: stretch;
+		overflow: visible;
+	}
+
+	:global(.page-support-region:has(.post-support)) {
+		align-self: stretch;
+	}
+
+	:global(.page-support-region:has(.post-support) > .support-module-slot) {
+		height: 100%;
+	}
+
+	@media (max-width: 879px) {
+		.post-support {
+			display: none;
+		}
+	}
+
+	.post-support__panel {
+		width: 100%;
+		padding: var(--space-card);
+		flex-shrink: 0;
+		transition:
+			transform var(--motion-normal) var(--motion-ease-standard),
+			opacity var(--motion-normal) var(--motion-ease-standard);
+	}
+
+	.post-support__toc {
+		display: flex;
+		flex: 0 0 auto;
+		flex-direction: column;
+		max-height: var(--post-support-toc-height);
+		min-height: 0;
+		align-self: start;
+		z-index: 1;
+		overflow: hidden;
+		transition:
+			max-height var(--motion-normal) var(--motion-ease-standard),
+			padding var(--motion-normal) var(--motion-ease-standard);
+	}
+
+	.post-support__heading {
+		display: flex;
+		align-items: center;
+		gap: var(--size-2);
+		margin-bottom: var(--size-3);
+		color: var(--text-primary);
+		font-size: var(--post-support-heading-size);
+		font-weight: 800;
+	}
+
+	.post-support__heading :global(svg) {
+		color: var(--accent);
+		font-size: var(--post-support-heading-icon-size);
+	}
+
+	.post-support__toc-body {
+		flex: 1 1 auto;
+		max-height: calc(var(--post-support-toc-height) - 5rem);
+		min-height: 0;
+		overflow-x: hidden;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		scrollbar-width: none;
+		transition: max-height var(--motion-normal)
+			var(--motion-ease-standard);
+	}
+
+	.post-support__toc-body::-webkit-scrollbar {
+		display: none;
+	}
+
+</style>

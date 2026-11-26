@@ -1,0 +1,16 @@
+---
+import type { HomePageViewModel } from "@/services/home";
+import HomeCategorySection from "./HomeCategorySection.astro";
+import HomeSection from "./HomeSection.astro";
+
+interface Props {
+	model: HomePageViewModel;
+}
+
+const { model } = Astro.props;
+---
+
+<div id="page-content" class="listing-page home-page ds-stack w-full" style="--stack-space: var(--space-section);">
+	{model.sections.map((section) => <HomeSection section={section} />)}
+	<HomeCategorySection section={model.categorySection} />
+</div>

@@ -1,0 +1,130 @@
+---
+import AlbumCard from "../components/albums/AlbumCard.astro";
+import FilterTabs from "../components/filter-tabs/FilterTabs.astro";
+import { siteConfig } from "../config";
+import I18nKey from "../i18n/i18nKey";
+import { i18n } from "../i18n/translation";
+import MainGridLayout from "../layouts/MainGridLayout.astro";
+import "@/components/albums/albums.css";
+import { scanAlbums } from "../utils/album-scanner";
+
+if (!siteConfig.featurePages.albums) {
+	return Astro.redirect("/404/");
+}
+
+const albumsData = await scanAlbums();
+const allTags = [...new Set(albumsData.flatMap((album) => album.tags || []))]
+	.filter(Boolean)
+	.sort();
+
+const filterTabs = [
+	{
+		value: "all",
+		label: i18n(I18nKey.albumsFilterAll),
+		count: albumsData.length,
+	},
+	...allTags.map((tag) => ({
+		value: tag,
+		label: tag,
+		count: albumsData.filter((album) => album.tags?.includes(tag)).length,
+	})),
+];
+
+const title = i18n(I18nKey.albums);
+const subtitle = i18n(I18nKey.albumsSubtitle);
+---
+
+<MainGridLayout title={title} description={subtitle} layoutPolicy="content">
+	<div
+		class="flex w-full rounded-(--radius-large) overflow-hidden relative min-h-32"
+	>
+		<div class="card-base z-10 px-6 sm:px-9 py-6 relative w-full">
+			<header class="albums-page-header mb-8">
+				<h1 class="albums-page-header__title text-90">
+					{title}
+				</h1>
+				<p class="text-60">{subtitle}</p>
+			</header>
+
+			{
+				albumsData.length > 0 && allTags.length > 0 && (
+					<div class="mb-8">
+						<FilterTabs tabs={filterTabs} dataAttr="tags" />
+					</div>
+				)
+			}
+
+			<div id="albums-grid" class="albums-grid">
+				{albumsData.map((album) => <AlbumCard album={album} />)}
+			</div>
+
+			<div id="no-results" class="hidden text-center py-16">
+				<div class="albums-empty-icon text-50 mb-4" aria-hidden="true">
+					⌕
+				</div>
+				<p class="albums-empty-message text-60">
+					{i18n(I18nKey.albumsNoResults)}
+				</p>
+			</div>
+
+			{
+				albumsData.length === 0 && (
+					<div class="text-center py-12">
+						<div class="text-50 mb-4">
+							<svg
+								class="w-16 h-16 mx-auto"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="1"
+									d="M4 16l4.586-4.586a2 2 0 0 1 2.828 0L16 16m-2-2 1.586-1.586a2 2 0 0 1 2.828 0L20 14m-6-6h.01M6 20h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"
+								/>
+							</svg>
+						</div>
+						<h2 class="albums-empty-message font-medium text-90 mb-2">
+							{i18n(I18nKey.albumsEmpty)}
+						</h2>
+						<p class="text-60">
+							{i18n(I18nKey.albumsEmptyDesc)}
+						</p>
+					</div>
+				)
+			}
+		</div>
+	</div>
+</MainGridLayout>
+
+<style>
+	.albums-page-header__title {
+		position: relative;
+		margin-bottom: 0.75rem;
+		font-size: var(--text-page-title-size);
+		font-weight: 700;
+	}
+
+	.albums-page-header__title::before {
+		position: absolute;
+		top: 50%;
+		left: -1rem;
+		width: 0.25rem;
+		height: 2rem;
+		border-radius: 0.375rem;
+		background: var(--primary);
+		content: "";
+		transform: translateY(-50%);
+	}
+
+	.albums-empty-icon {
+		font-size: var(--text-icon-display-size);
+		line-height: 1;
+	}
+
+	.albums-empty-message {
+		font-size: var(--text-section-title-size);
+	}
+</style>

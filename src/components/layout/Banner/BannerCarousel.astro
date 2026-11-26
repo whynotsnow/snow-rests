@@ -1,0 +1,79 @@
+---
+import type { BannerImages } from "@/services/banner";
+import type { SiteConfig } from "@/types/config";
+import BannerImage from "./BannerImage.astro";
+
+interface Props {
+	bannerImages: BannerImages;
+	intervalSeconds?: number;
+	position: SiteConfig["banner"]["position"];
+}
+
+const { bannerImages, intervalSeconds = 8, position } = Astro.props;
+const intervalMs = Math.max(intervalSeconds * 1000, 1500);
+const itemCount = Math.max(
+	Array.isArray(bannerImages.desktop) ? bannerImages.desktop.length : 0,
+	Array.isArray(bannerImages.mobile) ? bannerImages.mobile.length : 0,
+);
+const items = Array.from({ length: itemCount })
+	.map((_, index) => {
+		const desktopSrc = Array.isArray(bannerImages.desktop)
+			? bannerImages.desktop[index]
+			: typeof bannerImages.desktop === "string"
+				? bannerImages.desktop
+				: "";
+		const mobileSrc = Array.isArray(bannerImages.mobile)
+			? bannerImages.mobile[index]
+			: typeof bannerImages.mobile === "string"
+				? bannerImages.mobile
+				: "";
+
+		if (!desktopSrc && !mobileSrc) return null;
+		return { desktopSrc, mobileSrc };
+	})
+	.filter(Boolean);
+---
+
+<div
+	id="banner-carousel"
+	class="banner-enter-animation relative h-full w-full"
+	data-carousel-interval={intervalMs}
+>
+	<ul class="carousel-list h-full w-full">
+		{
+			items.map((item, index) => (
+				<li
+					class="carousel-item absolute inset-0"
+					data-active={index === 0 ? "true" : "false"}
+					data-banner-slide
+					data-has-desktop={Boolean(item?.desktopSrc)}
+					data-has-mobile={Boolean(item?.mobileSrc)}
+				>
+					{index === 0 ? (
+						<BannerImage
+							desktopSrc={item?.desktopSrc}
+							fetchpriority="high"
+							loading="eager"
+							mobileSrc={item?.mobileSrc}
+							position={position}
+						/>
+					) : (
+						<template data-banner-slide-content>
+							<BannerImage
+								desktopSrc={item?.desktopSrc}
+								mobileSrc={item?.mobileSrc}
+								position={position}
+							/>
+						</template>
+					)}
+				</li>
+			))
+		}
+	</ul>
+</div>
+
+<script>
+	import { initBannerCarouselFromDocument } from "./banner-carousel-client";
+
+	initBannerCarouselFromDocument();
+</script>

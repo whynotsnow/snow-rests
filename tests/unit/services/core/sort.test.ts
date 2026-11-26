@@ -1,0 +1,55 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+	applyPostQuery,
+	calculateRecommendScore,
+	sortByDate,
+	sortByScore,
+} from "@/services/core/sort";
+import type { PostIndexEntry, RawPost } from "@/services/core/types";
+
+function indexPost(score: number, published: string): PostIndexEntry {
+	return {
+		published: new Date(published),
+		score,
+	} as PostIndexEntry;
+}
+
+describe("content sorting", () => {
+	it("sorts scores without mutating the source", () => {
+		const posts = [indexPost(2, "2025-01-02"), indexPost(9, "2025-01-01")];
+
+		expect(sortByScore(posts).map((post) => post.score)).toEqual([9, 2]);
+		expect(posts.map((post) => post.score)).toEqual([2, 9]);
+	});
+
+	it("sorts dates in either direction", () => {
+		const posts = [indexPost(1, "2025-01-02"), indexPost(2, "2025-01-01")];
+
+		expect(sortByDate(posts).map((post) => post.score)).toEqual([2, 1]);
+		expect(sortByDate(posts, "desc").map((post) => post.score)).toEqual([
+			1, 2,
+		]);
+	});
+
+	it("applies the requested query sorter", () => {
+		const posts = [indexPost(2, "2025-01-02"), indexPost(9, "2025-01-01")];
+
+		expect(applyPostQuery(posts, { sort: "score" })[0].score).toBe(9);
+	});
+
+	it("combines recommendation inputs deterministically", () => {
+		vi.setSystemTime(new Date("2025-01-11T00:00:00.000Z"));
+		const post = {
+			data: {
+				published: new Date("2025-01-01T00:00:00.000Z"),
+				pinned: true,
+				priority: 2,
+				recommendScore: 3,
+			},
+		} as unknown as RawPost;
+
+		expect(calculateRecommendScore(post)).toBe(1527);
+		vi.useRealTimers();
+	});
+});

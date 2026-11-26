@@ -1,0 +1,20 @@
+---
+import ArchiveTimeline from "@components/archive/ArchiveTimeline.svelte";
+import I18nKey from "@i18n/i18nKey";
+import { i18n } from "@i18n/translation";
+import MainGridLayout from "@layouts/MainGridLayout.astro";
+import { buildArchivePageData } from "@/services/archive";
+import { getContentStore } from "@/services/core/content-store";
+import ArchiveCalendar from "@components/archive/ArchiveCalendar.astro";
+
+const store = await getContentStore();
+
+const { groups, calendar } = await buildArchivePageData(store);
+---
+
+<MainGridLayout title={i18n(I18nKey.archive)} layoutPolicy="content">
+	<div class="ds-stack">
+		<ArchiveCalendar calendarData={calendar} />
+		<ArchiveTimeline groups={groups} client:only="svelte" />
+	</div>
+</MainGridLayout>

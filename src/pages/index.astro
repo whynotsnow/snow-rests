@@ -1,0 +1,13 @@
+---
+import HomePage from "@components/home/HomePage.astro";
+import MainGridLayout from "../layouts/MainGridLayout.astro";
+import { getHomePageViewModel } from "@/services/home";
+import HomeSupport from "@components/home/HomeSupport.astro";
+
+const model = await getHomePageViewModel();
+---
+
+<MainGridLayout layoutPolicy="listing">
+	<HomeSupport slot="support" model={model.support} class="onload-animation" />
+	<HomePage {model} />
+</MainGridLayout>

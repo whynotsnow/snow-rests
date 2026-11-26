@@ -1,0 +1,19 @@
+---
+import LocalIcon from "@/components/ui/LocalIcon.astro";
+---
+
+<button
+	type="button"
+	id="back-to-top-btn"
+	class="floating-tool-button hide"
+	aria-label="Back to Top"
+	title="Back to Top"
+>
+	<LocalIcon name="material-symbols:keyboard-arrow-up-rounded" />
+</button>
+
+<script is:raw is:inline>
+    document.getElementById("back-to-top-btn")?.addEventListener("click", () => {
+        window.scroll({ top: 0, behavior: "smooth" });
+    });
+</script>

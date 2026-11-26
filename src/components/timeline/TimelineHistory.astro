@@ -1,0 +1,131 @@
+---
+import Icon from "@/components/misc/Icon.astro";
+import type { TimelinePageModel } from "@/services/timeline";
+
+interface Props {
+	model: TimelinePageModel;
+}
+
+const { model } = Astro.props;
+---
+
+<div class="timeline-history mb-12">
+	<h2
+		class="timeline-history__section-title font-bold text-black/90 dark:text-white/90 mb-8 flex items-center"
+	>
+		<span class="w-3 h-3 rounded-full bg-indigo-500 mr-3"></span>
+		{model.labels.history}
+	</h2>
+
+	<div
+		class="relative overflow-hidden rounded-xl bg-transparent border border-black/10 dark:border-white/10 p-6 hover:shadow-lg transition-shadow duration-300"
+	>
+		<div
+			class="flex overflow-x-auto pb-6 -mx-2 px-2 timeline-horizontal-scroll scrollbar-thin"
+			id="timeline-scrollbar"
+		>
+			<div class="flex space-x-8 min-w-max">
+				{
+					model.historyItems.map((item, index) => (
+						<div
+							class="flex flex-col items-center flex-shrink-0 w-72"
+							data-key={index}
+						>
+							<div
+								class="relative z-10 w-16 h-16 rounded-xl flex items-center justify-center mb-6"
+								style={`background-color: ${item.color || "rgb(99 102 241)"}`}
+							>
+								<Icon
+									icon={item.typeIcon}
+									class="timeline-history__icon text-white"
+									color="white"
+									fallback={item.title.charAt(0)}
+									loading="eager"
+								/>
+								<div class="absolute inset-0 rounded-xl border-2 border-white/30" />
+							</div>
+
+							<div class="timeline-history__caption text-black/50 dark:text-white/50 mb-2">
+								{item.displayDate}
+							</div>
+
+							<div class="flex-1 bg-transparent rounded-xl border border-black/10 dark:border-white/10 p-5 w-full">
+								<div class="flex flex-col gap-3">
+									<div>
+										<h3 class="timeline-history__item-title font-semibold text-black/90 dark:text-white/90 line-clamp-2">
+											{item.title}
+										</h3>
+										{item.organization && (
+											<div class="timeline-history__caption text-black/70 dark:text-white/70 mt-1">
+												{item.organization}{" "}
+												{item.position &&
+													`• ${item.position}`}
+											</div>
+										)}
+									</div>
+
+									<span
+										class={`timeline-history__caption px-2 py-1 rounded-full self-start ${item.typeBadgeClass}`}
+									>
+										{item.typeLabel}
+									</span>
+
+									<p class="timeline-history__body text-black/70 dark:text-white/70 line-clamp-3">
+										{item.description}
+									</p>
+
+									<div class="timeline-history__caption flex items-center justify-between text-black/60 dark:text-white/60 mt-2">
+										<div>{item.duration}</div>
+										{item.location && (
+											<div class="flex items-center">
+												<span class="mr-1">📍</span>
+												<span class="truncate max-w-[80px]">
+													{item.location}
+												</span>
+											</div>
+										)}
+									</div>
+								</div>
+							</div>
+						</div>
+					))
+				}
+			</div>
+		</div>
+
+		<div
+			class="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-transparent to-transparent pointer-events-none hidden md:block"
+		>
+		</div>
+	</div>
+</div>
+
+<style>
+	.timeline-history {
+		--timeline-history-section-title-size: var(--text-section-title-size);
+		--timeline-history-item-title-size: var(--text-section-title-size);
+		--timeline-history-body-size: var(--text-ui-size);
+		--timeline-history-caption-size: var(--text-caption-size);
+		--timeline-history-icon-size: var(--text-icon-large-size);
+	}
+
+	.timeline-history__section-title {
+		font-size: var(--timeline-history-section-title-size);
+	}
+
+	.timeline-history__item-title {
+		font-size: var(--timeline-history-item-title-size);
+	}
+
+	.timeline-history__body {
+		font-size: var(--timeline-history-body-size);
+	}
+
+	.timeline-history__caption {
+		font-size: var(--timeline-history-caption-size);
+	}
+
+	.timeline-history__icon {
+		font-size: var(--timeline-history-icon-size);
+	}
+</style>

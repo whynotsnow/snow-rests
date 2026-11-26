@@ -1,0 +1,14 @@
+---
+import PostDetailPage from "@/components/post-detail/PostDetailPage.astro";
+import {
+	buildPostDetailStaticPaths,
+	getPostDetailPageData,
+	type PostDetailStaticPathProps,
+} from "@/services/post-detail";
+
+export const getStaticPaths = buildPostDetailStaticPaths;
+const { postId } = Astro.props as PostDetailStaticPathProps;
+const page = await getPostDetailPageData(postId);
+---
+
+<PostDetailPage {...page} />

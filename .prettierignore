@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+dist/
+build/
+
+# Build outputs
+.astro/
+
+# Logs
+*.log
+pnpm-debug.log*
+
+# Lock files
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Third-party/minified static assets
+public/assets/js/*.min.js
+public/assets/css/*.min.css
+public/assets/js/twikoo.nocss.js
+public/assets/css/twikoo.css
+public/live2d-companion/l2d-widget.min.js
+public/live2d-companion/models/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docs
+**/*.md
+
+# Astro templates currently contain syntax that prettier-plugin-astro cannot parse reliably.
+**/*.astro

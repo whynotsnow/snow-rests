@@ -1,0 +1,617 @@
+---
+import LocalIcon from "@/components/ui/LocalIcon.astro";
+import { siteConfig } from "@/config";
+
+const tocDepth = siteConfig.toc.depth;
+const useJapaneseBadge = siteConfig.toc.useJapaneseBadge;
+---
+
+<div
+	class="floating-toc-wrapper"
+	data-depth={tocDepth}
+	data-japanese-badge={useJapaneseBadge}
+>
+	<button
+		id="floating-toc-btn"
+		class="floating-toc-btn btn-card"
+		aria-label="Table of Contents"
+	>
+		<svg
+			class="progress-ring"
+			width="100%"
+			height="100%"
+			viewBox="0 0 100 100"
+		>
+			<circle
+				class="progress-ring-circle"
+				cx="50"
+				cy="50"
+				r="40"
+				fill="transparent"></circle>
+		</svg>
+		<div class="btn-icon">
+			<LocalIcon name="material-symbols:toc-rounded" />
+		</div>
+	</button>
+	<div id="floating-toc-panel" class="floating-toc-panel">
+		<div class="floating-toc-panel-content scrollbar-thin" id="floating-toc-content"></div>
+	</div>
+</div>
+
+<style>
+	.floating-toc-wrapper {
+		--floating-toc-item-size: var(--text-ui-size);
+		--floating-toc-badge-size: var(--text-caption-size);
+		position: relative;
+		z-index: 61;
+		pointer-events: auto;
+		display: none;
+	}
+
+	.floating-toc-wrapper.active-toc {
+		display: block;
+	}
+
+	.floating-toc-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		position: relative;
+	}
+
+	.floating-toc-btn.active {
+		background: var(--btn-card-bg-active);
+	}
+
+	.progress-ring {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		transform: rotate(-90deg);
+		pointer-events: none;
+		z-index: 0;
+	}
+
+	#floating-toc-btn > .progress-ring {
+		width: 100%;
+		height: 100%;
+	}
+
+	.progress-ring-circle {
+		stroke: var(--primary);
+		stroke-width: 5;
+		stroke-dasharray: 251.2;
+		stroke-dashoffset: 251.2;
+		transition: stroke-dashoffset 0.1s linear;
+		stroke-linecap: round;
+	}
+
+	.btn-icon {
+		z-index: 1;
+		position: relative;
+	}
+
+	.btn-icon :global(.local-icon) {
+		width: 1.35rem;
+		height: 1.35rem;
+	}
+
+	.floating-toc-panel {
+		position: absolute;
+		bottom: calc(100% + var(--size-3));
+		right: 0;
+		width: 18rem;
+		max-height: 60vh;
+		color: var(--text-secondary);
+		background: var(--surface-raised);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-raised);
+		overflow: hidden;
+		opacity: 0;
+		visibility: hidden;
+		transform: translateY(10px) scale(0.95);
+		transition: all 0.2s ease;
+		pointer-events: none;
+	}
+
+	.floating-toc-panel.show {
+		opacity: 1;
+		visibility: visible;
+		transform: translateY(0) scale(1);
+		pointer-events: auto;
+	}
+
+	.floating-toc-panel-content {
+		padding: 0.75rem;
+		max-height: 60vh;
+		overflow-y: auto;
+		overflow-x: hidden;
+	}
+
+	@media (max-width: 768px) {
+		.floating-toc-panel {
+			width: 85vw;
+			max-width: 20rem;
+			right: 0;
+			bottom: calc(100% + var(--size-3));
+		}
+	}
+
+	:global(.floating-toc-item) {
+		display: flex;
+		align-items: center;
+		padding: 0.5rem;
+		color: var(--text-secondary);
+		text-decoration: none;
+		font-size: var(--floating-toc-item-size);
+		line-height: 1.5;
+		border-radius: 0.5rem;
+		transition: all 0.2s;
+	}
+
+	:global(.floating-toc-item:hover) {
+		background-color: var(--btn-regular-bg);
+		color: var(--primary);
+	}
+
+	:global(.floating-toc-item.active) {
+		background-color: var(--btn-card-bg-active);
+		color: var(--primary);
+		font-weight: 500;
+	}
+
+	:global(.floating-toc-badge) {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.25rem;
+		height: 1.25rem;
+		background: var(--btn-regular-bg);
+		color: var(--primary);
+		border-radius: 0.25rem;
+		font-size: var(--floating-toc-badge-size);
+		font-weight: bold;
+		margin-right: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	:global(.floating-toc-dot) {
+		width: 0.5rem;
+		height: 0.5rem;
+		background: var(--line-divider);
+		border-radius: 50%;
+		margin-right: 0.75rem;
+		margin-left: 0.375rem;
+		flex-shrink: 0;
+	}
+
+	:global(.floating-toc-dot-small) {
+		width: 0.35rem;
+		height: 0.35rem;
+		background: var(--line-divider);
+		border-radius: 50%;
+		margin-right: 0.75rem;
+		margin-left: 0.45rem;
+		flex-shrink: 0;
+	}
+
+	:global(.floating-toc-item.active .floating-toc-dot),
+	:global(.floating-toc-item.active .floating-toc-dot-small) {
+		background: var(--primary);
+	}
+
+	:global(.floating-toc-expanded-region) {
+		height: 0;
+		overflow: hidden;
+		opacity: 0;
+		transform: translateY(-4px);
+		will-change: height, opacity, transform;
+		transition:
+			height var(--motion-normal) var(--motion-ease-standard),
+			opacity var(--motion-fast) var(--motion-ease-standard),
+			transform var(--motion-normal) var(--motion-ease-standard);
+	}
+
+	:global(.floating-toc-expanded-region[data-expanded="true"]) {
+		opacity: 1;
+		transform: translateY(0);
+	}
+
+	:global(.floating-toc-text) {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		:global(.floating-toc-expanded-region) {
+			transition: none;
+		}
+	}
+</style>
+
+<script>
+	import {
+		getTocAncestorIndexes,
+		getTocBranchIndexes,
+		getTocNode,
+		scrollToHeading,
+		type TocItem,
+	} from "@/components/post-toc/toc-runtime";
+	import {
+		renderFloatingTocItem,
+		renderFloatingTocShell,
+	} from "@/components/post-toc/toc-render";
+	import { TocSlotTransitionController } from "@/components/post-toc/toc-slot-transition";
+	import {
+		getPostTocStore,
+		type TocStoreSnapshot,
+	} from "@/components/post-toc/toc-store";
+	import { resolveTocBranchView } from "@/components/post-toc/toc-view";
+	import { onPageLifecycle } from "@/utils/page-lifecycle";
+
+	class FloatingTOC {
+		private btn: HTMLElement | null;
+		private panel: HTMLElement | null;
+		private content: HTMLElement | null;
+		private wrapper: HTMLElement | null;
+		private isOpen = false;
+		private observer: MutationObserver | null = null;
+		private tocItems: TocItem[] = [];
+		private store = getPostTocStore();
+		private initialized = false;
+		private renderedRootIndex = -1;
+		private renderedVersion = -1;
+		private slotTransitions = new TocSlotTransitionController();
+		private removeStoreSubscriber: (() => void) | null = null;
+		private handleDocumentClick = (event: MouseEvent) => {
+			if (this.isOpen && !this.wrapper?.contains(event.target as Node)) {
+				this.close();
+			}
+		};
+		private handleKeydown = (event: KeyboardEvent) => {
+			if (event.key === "Escape" && this.isOpen) this.close();
+		};
+		private handleButtonClick = (event: MouseEvent) => {
+			event.stopPropagation();
+			this.toggle();
+		};
+		private handleContentClick = (event: MouseEvent) => {
+			const link = (event.target as HTMLElement).closest("a");
+			if (!link) return;
+
+			event.preventDefault();
+			const id = link.getAttribute("href")?.slice(1);
+			if (id) {
+				scrollToHeading(id, {
+					close: () => this.close(),
+				});
+			}
+		};
+
+		constructor() {
+			this.btn = document.getElementById("floating-toc-btn");
+			this.panel = document.getElementById("floating-toc-panel");
+			this.content = document.getElementById("floating-toc-content");
+			this.wrapper = document.querySelector(".floating-toc-wrapper");
+
+			this.init();
+		}
+
+		private init() {
+			if (this.initialized) return;
+
+			this.bindEvents();
+			this.removeStoreSubscriber = this.store.subscribe((snapshot) => {
+				// Floating TOC 只订阅共享 PostTocStore，不自己重新扫描标题。
+				this.renderFromStore(snapshot);
+				this.updateProgress();
+			});
+			this.generateTOC("init");
+			this.observeContent();
+			this.updateProgress();
+			this.initialized = true;
+		}
+
+		private observeContent() {
+			this.observer?.disconnect();
+			const contentWrapper = document.getElementById("post-container");
+			if (contentWrapper) {
+				this.observer = new MutationObserver(() => {
+					// 图片、解密内容或 Mermaid 改变高度后，只触发布局重测，不重建 TOC 数据。
+					this.store.measure("layout-remeasure");
+					this.updateProgress();
+				});
+				this.observer.observe(contentWrapper, {
+					childList: true,
+					subtree: true,
+				});
+			}
+		}
+
+		private updateProgress() {
+			if (!this.btn) return;
+
+			const scrollTop =
+				window.scrollY || document.documentElement.scrollTop;
+			const docHeight =
+				document.documentElement.scrollHeight -
+				document.documentElement.clientHeight;
+			const scrollPercent = docHeight > 0 ? scrollTop / docHeight : 0;
+
+			const circle = this.btn.querySelector(
+				".progress-ring-circle",
+			) as SVGCircleElement;
+			if (circle) {
+				const radius = circle.r.baseVal.value;
+				const circumference = radius * 2 * Math.PI;
+				const offset = Math.max(
+					0,
+					Math.min(
+						circumference,
+						circumference - scrollPercent * circumference,
+					),
+				);
+				circle.style.strokeDashoffset = offset.toString();
+			}
+		}
+
+		private updateActiveHeading(snapshot = this.store.getSnapshot()) {
+			if (!this.content || snapshot.headings.length === 0) return;
+			const activeIndex = snapshot.activeIndex;
+			const branchView = resolveTocBranchView(
+				snapshot.graph,
+				activeIndex,
+				{ rootsOnly: activeIndex < 0 },
+			);
+			this.renderExpandedRegion(branchView.activeRootIndex, snapshot);
+
+			const links = Array.from(
+				this.content.querySelectorAll<HTMLElement>(
+					".floating-toc-item[data-toc-index]",
+				),
+			);
+			links.forEach((link) => {
+				const index = Number(link.dataset.tocIndex ?? -1);
+				const node = getTocNode(snapshot.graph, index);
+				const isActive = index === activeIndex;
+				const isCurrentBranch =
+					node?.rootIndex === branchView.activeRootIndex;
+				link.classList.toggle("active", isActive);
+				link.classList.toggle("is-current-branch", isCurrentBranch);
+
+				if (index === activeIndex && this.isOpen) {
+					this.ensureActiveContextVisible(activeIndex);
+				}
+			});
+		}
+
+		private ensureActiveContextVisible(activeIndex: number) {
+			if (!this.content) return;
+
+			const panelContent = this.content;
+			const panelRect = panelContent.getBoundingClientRect();
+			const currentScroll = panelContent.scrollTop;
+			const viewportHeight = panelContent.clientHeight;
+			const padding = 12;
+			const activeLink = this.getLink(activeIndex);
+			if (!activeLink) return;
+
+			const activeRange = this.resolveLinkRange(
+				activeLink,
+				panelRect,
+			);
+			if (!activeRange) return;
+
+			const ancestorLinks = getTocAncestorIndexes(
+				this.store.getSnapshot().graph,
+				activeIndex,
+			)
+				.map((index) => this.getLink(index))
+				.filter((link): link is HTMLElement => Boolean(link));
+			const candidates = [...ancestorLinks, activeLink];
+			// 面板打开时尽量保留祖先标题上下文，空间不足再退回只显示 active 项。
+			const maxRangeHeight = Math.max(
+				activeRange.bottom - activeRange.top,
+				viewportHeight - padding * 2,
+			);
+			let contextRange = activeRange;
+			for (let start = 0; start < candidates.length; start += 1) {
+				const ranges = candidates
+					.slice(start)
+					.map((link) => this.resolveLinkRange(link, panelRect))
+					.filter(
+						(
+							range,
+						): range is { top: number; bottom: number } =>
+							Boolean(range),
+					);
+				if (ranges.length === 0) continue;
+
+				const top = Math.min(...ranges.map((range) => range.top));
+				const bottom = Math.max(
+					...ranges.map((range) => range.bottom),
+				);
+				if (bottom - top <= maxRangeHeight) {
+					contextRange = { top, bottom };
+					break;
+				}
+			}
+
+			const safeTop = currentScroll + padding;
+			const safeBottom = currentScroll + viewportHeight - padding;
+			let nextTop = currentScroll;
+			if (contextRange.top < safeTop) {
+				nextTop = contextRange.top - padding;
+			} else if (contextRange.bottom > safeBottom) {
+				nextTop = contextRange.bottom - viewportHeight + padding;
+			}
+
+			if (Math.abs(nextTop - currentScroll) < 1) return;
+			panelContent.scrollTo({
+				top: Math.max(0, nextTop),
+				left: 0,
+				behavior: "auto",
+			});
+		}
+
+		private getLink(index: number): HTMLElement | null {
+			return this.content?.querySelector<HTMLElement>(
+				`.floating-toc-item[data-toc-index="${index}"]`,
+			) ?? null;
+		}
+
+		private resolveLinkRange(
+			link: HTMLElement,
+			panelRect: DOMRect,
+		): { top: number; bottom: number } | null {
+			if (!this.content) return null;
+
+			const rect = link.getBoundingClientRect();
+			const top = this.content.scrollTop + rect.top - panelRect.top;
+			const height = Math.max(rect.height, link.scrollHeight);
+			if (height <= 0) return null;
+			return {
+				top: top - 4,
+				bottom: top + height + 4,
+			};
+		}
+
+		private renderExpandedRegion(
+			rootIndex: number,
+			snapshot = this.store.getSnapshot(),
+		) {
+			if (!this.content || this.renderedRootIndex === rootIndex) return;
+
+			// 移动 TOC 与桌面 TOC 使用同一 slot 过渡控制器，保证分支展开时序一致。
+			for (const slot of this.content.querySelectorAll<HTMLElement>(
+				".floating-toc-expanded-region",
+			)) {
+				if (Number(slot.dataset.rootIndex) !== rootIndex) {
+					this.slotTransitions.collapse(slot);
+				}
+			}
+
+			this.renderedRootIndex = rootIndex;
+			if (rootIndex < 0) return;
+
+			const slot = this.content.querySelector<HTMLElement>(
+				`.floating-toc-expanded-region[data-root-index="${rootIndex}"]`,
+			);
+			if (!slot) return;
+
+			const childItems = getTocBranchIndexes(
+				snapshot.graph,
+				rootIndex,
+			)
+				.filter((index) => index !== rootIndex)
+				.map((index) => ({
+					item: this.tocItems[index],
+					index,
+				}));
+			if (!childItems.length) return;
+
+			const nextHTML = childItems
+				.map(({ item, index }) => renderFloatingTocItem(item, index))
+				.join("");
+			this.slotTransitions.expand(slot, nextHTML);
+		}
+
+		private renderFromStore(snapshot: TocStoreSnapshot) {
+			if (snapshot.items.length === 0) {
+				this.wrapper?.classList.remove("active-toc");
+				this.wrapper?.classList.add("no-toc");
+				this.tocItems = [];
+				this.renderedRootIndex = -1;
+				this.renderedVersion = -1;
+				if (this.content) this.content.innerHTML = "";
+				return;
+			}
+
+			this.wrapper?.classList.remove("no-toc");
+			this.wrapper?.classList.add("active-toc");
+			this.tocItems = snapshot.items;
+			if (this.renderedVersion !== snapshot.version) {
+				// version 变化才重建 shell；滚动只更新 active class 和展开分支。
+				const html = renderFloatingTocShell(snapshot.items);
+
+				if (this.content) {
+					this.content.innerHTML = html;
+				}
+				this.renderedRootIndex = -1;
+				this.renderedVersion = snapshot.version;
+			}
+
+			this.updateActiveHeading(snapshot);
+		}
+
+		private generateTOC(reason: "init" | "page-view" = "page-view") {
+			const snapshot = this.store.refresh(undefined, reason);
+			this.renderFromStore(snapshot);
+		}
+
+		private bindEvents() {
+			this.btn?.addEventListener("click", this.handleButtonClick);
+			document.addEventListener("click", this.handleDocumentClick);
+			this.content?.addEventListener("click", this.handleContentClick);
+			document.addEventListener("keydown", this.handleKeydown);
+		}
+
+		private toggle() {
+			if (this.isOpen) {
+				this.close();
+			} else {
+				this.open();
+			}
+		}
+
+		private open() {
+			this.isOpen = true;
+			this.panel?.classList.add("show");
+			this.btn?.classList.add("active");
+			this.wrapper?.classList.add("active");
+		}
+
+		private close() {
+			this.isOpen = false;
+			this.panel?.classList.remove("show");
+			this.btn?.classList.remove("active");
+			this.wrapper?.classList.remove("active");
+		}
+
+		reinit() {
+			this.close();
+			// Swup page-view 后重新读取当前页面 TOC，同时保留同一个组件实例和事件绑定。
+			this.generateTOC("page-view");
+			this.observeContent();
+			this.updateProgress();
+		}
+
+		dispose() {
+			this.btn?.removeEventListener("click", this.handleButtonClick);
+			document.removeEventListener("click", this.handleDocumentClick);
+			this.content?.removeEventListener("click", this.handleContentClick);
+			document.removeEventListener("keydown", this.handleKeydown);
+			this.observer?.disconnect();
+			this.removeStoreSubscriber?.();
+			this.slotTransitions.dispose();
+			this.initialized = false;
+		}
+	}
+
+	let floatingToc: FloatingTOC | null = null;
+	const getFloatingToc = () => {
+		if (!floatingToc) {
+			floatingToc = new FloatingTOC();
+		}
+		return floatingToc;
+	};
+
+	document.addEventListener("DOMContentLoaded", () => getFloatingToc());
+	onPageLifecycle("page-view", () => {
+		setTimeout(() => getFloatingToc().reinit(), 200);
+	});
+</script>

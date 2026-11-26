@@ -1,0 +1,63 @@
+---
+import { Icon } from "astro-icon/components";
+import type { PostCardViewModel } from "@/services/core/types";
+import I18nKey from "@/i18n/i18nKey";
+import { i18n } from "@/i18n/translation";
+import { formatDateToYYYYMMDD } from "@/utils/date-utils";
+import { siteConfig } from "@/config";
+import { formatPostCardWordCount } from "@/components/modules/post-list/word-count";
+
+interface Props {
+	post: Pick<PostCardViewModel, "published" | "category" | "meta">;
+}
+
+const { post } = Astro.props;
+const words = post.meta.words;
+const wordCount =
+	words > 0
+		? formatPostCardWordCount(
+				words,
+				siteConfig.lang,
+				i18n(words > 1 ? I18nKey.wordsCount : I18nKey.wordCount),
+			)
+		: null;
+---
+
+<div class="post-list-card__meta ds-cluster">
+	<div class="post-list-card__meta-item post-list-card__meta-item--date">
+		<Icon
+			name="material-symbols:calendar-today-outline-rounded"
+			class="post-list-card__meta-icon"
+		/>
+		<time datetime={post.published}>
+			{formatDateToYYYYMMDD(post.published)}
+		</time>
+	</div>
+
+	<div class="post-list-card__meta-item post-list-card__meta-item--category">
+		<Icon
+			name="material-symbols:book-2-outline-rounded"
+			class="post-list-card__meta-icon"
+		/>
+		<a
+			href={post.category.url}
+			class="post-list-card__meta-link link-lg transition"
+			aria-label={`View all posts in the ${post.category.name} category`}
+			title={post.category.name || i18n(I18nKey.uncategorized)}
+		>
+			{post.category.name || i18n(I18nKey.uncategorized)}
+		</a>
+	</div>
+
+	{
+		wordCount && (
+			<div class="post-list-card__meta-item post-list-card__meta-item--words">
+				<Icon
+					name="material-symbols:article-outline-rounded"
+					class="post-list-card__meta-icon"
+				/>
+				<span title={wordCount.exact}>{wordCount.display}</span>
+			</div>
+		)
+	}
+</div>

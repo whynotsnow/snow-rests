@@ -1,0 +1,25 @@
+---
+import Pagination from "@components/control/Pagination.astro";
+import PostGrid from "@components/post/PostGrid.astro";
+import type { CategoryPageProps } from "@/services/category-page";
+import CategoryPostListClient from "./CategoryPostListClient.svelte";
+
+type Props = Pick<
+	CategoryPageProps,
+	"posts" | "pagination" | "categories" | "categorySlug" | "tagIndexUrl"
+>;
+
+const { posts, pagination, categories, categorySlug, tagIndexUrl } =
+	Astro.props;
+---
+
+<CategoryPostListClient
+	client:load
+	{categories}
+	{categorySlug}
+	{tagIndexUrl}
+	resultCount={pagination.total}
+>
+	<PostGrid posts={posts} id="post-list-container" />
+	<Pagination page={pagination} class="mx-auto" style={`animation-delay: calc(var(--content-delay) + ${posts.length * 50}ms)`} />
+</CategoryPostListClient>

@@ -1,0 +1,146 @@
+import { getCategoryTagUrl } from "@/utils/url";
+import { generateTagSlug, getCategoryUrl, resolveCategory } from "./taxonomy";
+import { resolveImageUrl } from "./content-assets";
+import { UNCATEGORIZED } from "@constants/constants";
+import type {
+	PostCardViewModel,
+	PostIndexEntry,
+	PostNavigationLink,
+	PostRouteIndex,
+	RawPost,
+	UIMeta,
+} from "./types";
+import { calculateRecommendScore } from "./sort";
+
+type ContentMeta = {
+	words?: number;
+	excerpt?: string;
+	minutes?: number;
+};
+
+type NavigationMeta = {
+	prev?: PostNavigationLink;
+	next?: PostNavigationLink;
+};
+
+function getContentMeta(post: RawPost): Required<ContentMeta> {
+	const frontmatter = post.rendered?.metadata?.frontmatter as
+		| ContentMeta
+		| undefined;
+
+	// words/excerpt/minutes 来自 Astro 渲染元数据，列表索引不再保留 Markdown 正文。
+	return {
+		words: frontmatter?.words ?? 0,
+		excerpt: frontmatter?.excerpt ?? "",
+		minutes: frontmatter?.minutes ?? 0,
+	};
+}
+
+export function buildCategoryItems(category: string): UIMeta {
+	const canonical = resolveCategory(category.trim() || UNCATEGORIZED);
+	return {
+		...canonical,
+		url: getCategoryUrl(canonical.slug),
+	};
+}
+
+export function buildTagItems(tags: string[], categorySlug: string): UIMeta[] {
+	return (tags ?? [])
+		.map((tag) => {
+			const name = tag.trim();
+			const slug = generateTagSlug(name);
+			return {
+				name,
+				slug,
+				url: getCategoryTagUrl(categorySlug, slug),
+			};
+		})
+		.filter((tag) => tag.name.length > 0)
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function buildNavigation(
+	posts: readonly PostIndexEntry[],
+): ReadonlyMap<string, NavigationMeta> {
+	const navigation = new Map<string, NavigationMeta>();
+
+	// posts 已按发布时间排序；这里仅注入相邻导航，不重新计算 canonical URL。
+	for (let index = 1; index < posts.length; index++) {
+		const nextPost = posts[index - 1];
+		navigation.set(posts[index].id, {
+			next: { title: nextPost.title, url: nextPost.route.canonicalUrl },
+		});
+	}
+
+	for (let index = 0; index < posts.length - 1; index++) {
+		const prevPost = posts[index + 1];
+		const current = navigation.get(posts[index].id) ?? {};
+		navigation.set(posts[index].id, {
+			...current,
+			prev: { title: prevPost.title, url: prevPost.route.canonicalUrl },
+		});
+	}
+
+	return navigation;
+}
+
+export function buildPostIndexEntries(
+	posts: readonly RawPost[],
+	routes: PostRouteIndex,
+): PostIndexEntry[] {
+	const entries = posts.map((post, index): PostIndexEntry => {
+		const route = routes.byId.get(post.id);
+		if (!route) throw new Error(`Missing post route for ${post.id}`);
+
+		// route 必须来自权威 PostRouteIndex，UI 层不再从文件名或 alias 推导链接。
+		const contentMeta = getContentMeta(post);
+		const category = buildCategoryItems(post.data.category);
+		return {
+			id: post.id,
+			postId: index + 1,
+			route,
+			title: post.data.title,
+			description: post.data.description,
+			published: post.data.published,
+			updated: post.data.updated,
+			category,
+			tags: buildTagItems(post.data.tags, category.slug),
+			score: calculateRecommendScore(post),
+			...contentMeta,
+			pinned: post.data.pinned,
+			draft: post.data.draft,
+			encrypted: post.data.encrypted,
+			cover: resolveImageUrl(post),
+		};
+	});
+
+	const navigation = buildNavigation(entries);
+	return entries.map((entry) => ({
+		...entry,
+		...navigation.get(entry.id),
+	}));
+}
+
+export function toPostCardViewModel(post: PostIndexEntry): PostCardViewModel {
+	return {
+		id: post.id,
+		slug: post.category.slug,
+		url: post.route.canonicalUrl,
+		title: post.title,
+		description: post.description,
+		published: post.published.toISOString(),
+		updated: post.updated?.toISOString(),
+		category: post.category,
+		tags: post.tags,
+		pinned: post.pinned,
+		meta: {
+			id: post.id,
+			category: post.category,
+			tags: post.tags,
+			words: post.words,
+			excerpt: post.excerpt,
+		},
+		hasCoverImage: Boolean(post.cover),
+		image: post.cover,
+	};
+}

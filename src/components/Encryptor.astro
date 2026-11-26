@@ -1,0 +1,20 @@
+---
+import CryptoJS from "crypto-js";
+import PasswordProtection from "./PasswordProtection.astro";
+
+interface Props {
+	password: string | number;
+}
+
+const { password } = Astro.props;
+
+const htmlContent = await Astro.slots.render("default");
+
+const contentToEncrypt = "MIZUKI-VERIFY:" + htmlContent;
+const encryptedContent = CryptoJS.AES.encrypt(
+	contentToEncrypt,
+	String(password),
+).toString();
+---
+
+<PasswordProtection encryptedContent={encryptedContent} />

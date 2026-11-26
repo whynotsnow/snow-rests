@@ -1,0 +1,1832 @@
+import { expect, type Page, test } from "@playwright/test";
+import { E2E_POSTS } from "../../support/content-fixtures";
+import { gotoPage } from "../../support/navigation";
+
+const defaultPlaylist = [
+	{
+		artist: "Test Artist",
+		id: 1,
+		name: "Test Song",
+		pic: "/assets/music/cover/xryx.jpg",
+		url: "/assets/music/url/xryx.mp3",
+	},
+	{
+		artist: "Second Artist",
+		id: 2,
+		name: "Second Song",
+		pic: "/assets/music/cover/hitori.jpg",
+		url: "/assets/music/url/hitori.mp3",
+	},
+];
+
+async function mockMusicPlaylist(page: Page, playlist = defaultPlaylist) {
+	await page.route("https://meting.whynotsnow.com/**", async (route) => {
+		await route.fulfill({
+			contentType: "application/json",
+			json: playlist,
+		});
+	});
+}
+
+async function openMiniPlayer(page: Page) {
+	const miniPlayer = page.locator(".mini-player");
+	const hiddenOrb = page.locator(".orb-player");
+	await expect(hiddenOrb).toBeVisible({ timeout: 15_000 });
+	for (let attempt = 0; attempt < 4; attempt += 1) {
+		await hiddenOrb.click();
+		try {
+			await miniPlayer.waitFor({ state: "visible", timeout: 2_000 });
+			return miniPlayer;
+		} catch {
+			if (await miniPlayer.isVisible()) return miniPlayer;
+		}
+	}
+	await expect(miniPlayer).toBeVisible();
+	return miniPlayer;
+}
+
+async function waitForFloatingToolsClient(page: Page) {
+	await expect(page.locator("#floating-tools-switch")).toBeVisible({
+		timeout: 30_000,
+	});
+	await expect(page.locator("#floating-tools #scheme-switch")).toHaveCount(
+		1,
+		{ timeout: 30_000 },
+	);
+	await expect(
+		page.locator("#floating-tools #display-settings-switch"),
+	).toHaveCount(1, { timeout: 30_000 });
+}
+
+async function expectCompanionMenuIcon(
+	page: Page,
+	label: string,
+	icon: string,
+) {
+	await expect(
+		page.frameLocator("#l2d-iframe").getByRole("button", { name: label }),
+	).toHaveAttribute("data-local-icon", icon);
+}
+
+test("floating tools owns theme, settings, toc, and back-to-top actions", async ({
+	page,
+}) => {
+	await gotoPage(page, E2E_POSTS.writing.path);
+	await waitForFloatingToolsClient(page);
+
+	const tools = page.locator("#floating-tools");
+	const toggle = page.locator("#floating-tools-switch");
+	await expect(tools).toBeVisible();
+	await expect(toggle).toHaveAttribute("aria-expanded", "false");
+	await expect(page.locator("#navbar #scheme-switch")).toHaveCount(0);
+	await expect(page.locator("#navbar #display-settings-switch")).toHaveCount(
+		0,
+	);
+
+	await toggle.click();
+	await expect(toggle).toHaveAttribute("aria-expanded", "true");
+	await expect(page.locator("#floating-tools #scheme-switch")).toBeVisible();
+	await expect(
+		page.locator("#floating-tools #display-settings-switch"),
+	).toBeVisible();
+	await expect(
+		page.locator("#floating-tools #music-player-switch"),
+	).toBeVisible();
+	await expect(
+		page.locator("#floating-tools #floating-toc-btn"),
+	).toBeVisible();
+
+	const initialDark = await page
+		.locator("html")
+		.evaluate((element) => element.classList.contains("dark"));
+	await page.locator("#floating-tools #scheme-switch").click();
+	await expect
+		.poll(() =>
+			page
+				.locator("html")
+				.evaluate((element) => element.classList.contains("dark")),
+		)
+		.toBe(!initialDark);
+
+	const settingsButton = page.locator(
+		"#floating-tools #display-settings-switch",
+	);
+	await expect(settingsButton.locator(".local-icon")).toHaveAttribute(
+		"data-local-icon",
+		"material-symbols:settings-rounded",
+	);
+	await settingsButton.click();
+	await expect(page.locator("#display-setting")).not.toHaveClass(
+		/float-panel-closed/,
+	);
+	const settingsTransitionProperties = await page
+		.locator("#display-setting")
+		.evaluate((element) => getComputedStyle(element).transitionProperty);
+	expect(settingsTransitionProperties).not.toContain("all");
+	expect(settingsTransitionProperties).not.toContain("left");
+	expect(settingsTransitionProperties).not.toContain("right");
+	expect(settingsTransitionProperties).not.toContain("top");
+	const settingsGeometry = await page
+		.locator("#display-setting")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return {
+				bottom: window.innerHeight - rect.bottom,
+				left: rect.left,
+				right: window.innerWidth - rect.right,
+				top: rect.top,
+			};
+		});
+	expect(settingsGeometry.top).toBeGreaterThanOrEqual(8);
+	expect(settingsGeometry.right).toBeGreaterThanOrEqual(8);
+	expect(settingsGeometry.bottom).toBeGreaterThanOrEqual(8);
+	expect(settingsGeometry.left).toBeGreaterThanOrEqual(8);
+
+	const bannerSettings = page
+		.getByRole("button", { name: "横幅", exact: true })
+		.locator("xpath=ancestor::*[contains(@class, 'setting-section')][1]");
+	const effectsSettings = page
+		.getByRole("button", { name: "特效设置", exact: true })
+		.locator("xpath=ancestor::*[contains(@class, 'setting-section')][1]");
+	await expect(
+		bannerSettings.getByRole("button", { name: "波纹动画" }),
+	).toHaveCount(0);
+	await expect(
+		effectsSettings.getByRole("button", { name: "波纹动画" }),
+	).toBeVisible();
+
+	await page.locator(".post-detail__header h1").click();
+	await expect(page.locator("#display-setting")).toHaveClass(
+		/float-panel-closed/,
+	);
+
+	await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+	await expect(page.locator("#back-to-top-btn")).toBeVisible();
+	await page.locator("#back-to-top-btn").click();
+	await expect
+		.poll(() => page.evaluate(() => window.scrollY))
+		.toBeLessThan(8);
+});
+
+test("floating TOC progress ring geometry", async ({ page }) => {
+	await gotoPage(page, E2E_POSTS.writing.path);
+	await page.locator("#floating-tools-switch").click();
+	await expect(
+		page.locator("#floating-tools #floating-toc-btn"),
+	).toBeVisible();
+
+	const tocProgressGeometry = await page
+		.locator("#floating-tools #floating-toc-btn")
+		.evaluate((button) => {
+			const ring = button.querySelector<SVGSVGElement>(".progress-ring")!;
+			const icon = button.querySelector<HTMLElement>(
+				".btn-icon .local-icon",
+			)!;
+			const buttonRect = button.getBoundingClientRect();
+			const ringRect = ring.getBoundingClientRect();
+			const iconRect = icon.getBoundingClientRect();
+			return {
+				buttonWidth: buttonRect.width,
+				buttonHeight: buttonRect.height,
+				ringWidth: ringRect.width,
+				ringHeight: ringRect.height,
+				iconWidth: iconRect.width,
+				iconHeight: iconRect.height,
+			};
+		});
+	expect(tocProgressGeometry.ringWidth).toBeGreaterThan(
+		tocProgressGeometry.buttonWidth * 0.9,
+	);
+	expect(tocProgressGeometry.ringHeight).toBeGreaterThan(
+		tocProgressGeometry.buttonHeight * 0.9,
+	);
+	expect(tocProgressGeometry.iconWidth).toBeLessThan(
+		tocProgressGeometry.ringWidth,
+	);
+	expect(tocProgressGeometry.iconHeight).toBeLessThan(
+		tocProgressGeometry.ringHeight,
+	);
+});
+
+test("floating TOC uses shared post TOC data sources", async ({ page }) => {
+	await gotoPage(page, E2E_POSTS.writing.path);
+	await page.locator("#floating-tools-switch").click();
+	const tocButton = page.locator("#floating-tools #floating-toc-btn");
+	await expect(tocButton).toBeVisible();
+	await tocButton.click();
+
+	const staticTocItems = await page.locator("#post-toc-data").evaluate(
+		(dataElement) =>
+			JSON.parse(dataElement.textContent || "[]") as Array<{
+				id: string;
+				text: string;
+				level: number;
+			}>,
+	);
+	const rootTocItems = staticTocItems.filter((item) => item.level === 0);
+	await expect(
+		page.locator("#floating-toc-content .floating-toc-item"),
+	).toHaveCount(rootTocItems.length);
+	await expect(
+		page.locator("#floating-toc-content .floating-toc-item", {
+			hasText: "推荐模板",
+		}),
+	).toBeVisible();
+
+	await page.evaluate(() => {
+		const heading = document.createElement("h2");
+		heading.id = "outside-floating-toc-heading";
+		heading.textContent = "Outside Floating TOC Heading";
+		document.querySelector("#main-grid")?.prepend(heading);
+	});
+	await expect(
+		page.locator("#floating-toc-content .floating-toc-item", {
+			hasText: "Outside Floating TOC Heading",
+		}),
+	).toHaveCount(0);
+
+	const categoryTagsItem = staticTocItems.find((item) =>
+		item.text.includes("分类和标签"),
+	);
+	if (!categoryTagsItem) throw new Error("Missing 分类和标签 TOC item");
+	await page.evaluate((id) => {
+		const heading = document.getElementById(id);
+		if (!heading) throw new Error(`Missing heading ${id}`);
+		const offset =
+			Number.parseFloat(
+				getComputedStyle(document.documentElement).getPropertyValue(
+					"--main-content-offset",
+				),
+			) || 0;
+		window.scrollTo({
+			top: heading.getBoundingClientRect().top + window.scrollY - offset,
+			behavior: "auto",
+		});
+	}, categoryTagsItem.id);
+	await expect(
+		page.locator("#floating-toc-content .floating-toc-item", {
+			hasText: "分类和标签",
+		}),
+	).toBeVisible();
+});
+
+test("floating TOC refreshes from decrypted content", async ({ page }) => {
+	await gotoPage(page, E2E_POSTS.encrypted.path);
+	await page.locator("#floating-tools-switch").click();
+	const tocButton = page.locator("#floating-tools #floating-toc-btn");
+	await expect(tocButton).toBeHidden();
+	await expect(page.locator("#post-toc-data")).toHaveCount(0);
+	await expect(
+		page.locator("#floating-toc-content .floating-toc-item"),
+	).toHaveCount(0);
+
+	await page.locator("#password-input").fill("123456");
+	await page.locator("#unlock-btn").click();
+	await expect(page.locator("#decrypted-content")).toBeVisible();
+	await expect(tocButton).toBeVisible();
+	await expect(
+		page.locator("#floating-toc-content .floating-toc-item", {
+			hasText: "如何启用",
+		}),
+	).toHaveCount(1);
+});
+
+test("floating tools controls music visibility while the player owns its presentation", async ({
+	page,
+}) => {
+	await mockMusicPlaylist(page);
+	await page.addInitScript(() => {
+		HTMLMediaElement.prototype.play = function () {
+			this.dispatchEvent(new Event("play"));
+			return Promise.resolve();
+		};
+		HTMLMediaElement.prototype.pause = function () {
+			this.dispatchEvent(new Event("pause"));
+		};
+	});
+	await gotoPage(page, "/");
+	await waitForFloatingToolsClient(page);
+
+	const tools = page.locator("#floating-tools");
+	const miniPlayer = page.locator(".mini-player");
+	const hiddenOrb = page.locator(".orb-player");
+	await expect(miniPlayer).not.toBeVisible();
+	await expect(hiddenOrb).toBeVisible();
+
+	await page.locator("#floating-tools-switch").click();
+	const musicSwitch = page.locator("#music-player-switch");
+	await expect(musicSwitch).toHaveAttribute("aria-pressed", "true");
+	await expect(musicSwitch).toHaveAccessibleName("隐藏播放器");
+	await musicSwitch.click();
+	await expect(musicSwitch).toHaveAttribute("aria-pressed", "false");
+	await expect(musicSwitch).toHaveAccessibleName("显示音乐播放器");
+	await expect(hiddenOrb).not.toBeVisible();
+	await musicSwitch.click();
+	await expect(musicSwitch).toHaveAttribute("aria-pressed", "true");
+	await expect(hiddenOrb).toBeVisible();
+	await hiddenOrb.hover();
+	const defaultCoverPresentation = await hiddenOrb.evaluate((element) => {
+		const rect = element.getBoundingClientRect();
+		const player = element.closest<HTMLElement>(".music-player");
+		const matrix = new DOMMatrix(getComputedStyle(element).transform);
+		return {
+			height: rect.height,
+			overflow: player ? getComputedStyle(player).overflow : "",
+			scaleX: Math.hypot(matrix.a, matrix.b),
+			width: rect.width,
+		};
+	});
+	expect(defaultCoverPresentation.overflow).toBe("visible");
+	expect(defaultCoverPresentation.width).toBeCloseTo(48, 0);
+	expect(defaultCoverPresentation.height).toBeCloseTo(48, 0);
+	expect(defaultCoverPresentation.scaleX).toBeCloseTo(1, 2);
+
+	const collapsedCoverGeometry = await hiddenOrb.evaluate((element) => {
+		const rect = element.getBoundingClientRect();
+		return { bottom: rect.bottom, top: rect.top };
+	});
+	await hiddenOrb.click();
+	await expect(miniPlayer).toBeVisible();
+	await expect
+		.poll(() =>
+			miniPlayer
+				.locator(".mini-player__cover")
+				.evaluate((element, collapsedGeometry) => {
+					const rect = element.getBoundingClientRect();
+					return Math.max(
+						Math.abs(collapsedGeometry.bottom - rect.bottom),
+						Math.abs(collapsedGeometry.top - rect.top),
+					);
+				}, collapsedCoverGeometry),
+		)
+		.toBeLessThanOrEqual(2);
+
+	const expandedTransition = await miniPlayer
+		.getByRole("button", { name: "展开音乐播放器" })
+		.evaluate((button) => {
+			const tools = document.getElementById("floating-tools");
+			const toolsRail = tools?.querySelector<HTMLElement>(
+				".floating-tools__rail",
+			);
+			if (!tools || !toolsRail) return Promise.resolve(null);
+
+			return new Promise<{
+				expandedClipPath: string | null;
+				toolTransforms: number[];
+				toolsKeyframeCount: number;
+				toolsTransitionDuration: number;
+			} | null>((resolve) => {
+				const observer = new MutationObserver(() => {
+					if (tools.dataset.layoutMotion !== "running") return;
+					observer.disconnect();
+					window.clearTimeout(timeout);
+
+					const animation = toolsRail.getAnimations()[0];
+					const effect = animation?.effect as KeyframeEffect | null;
+					const keyframes = effect?.getKeyframes() ?? [];
+					const toolTransforms = keyframes.map((frame) => {
+						return typeof frame.transform === "string"
+							? new DOMMatrixReadOnly(frame.transform).m42
+							: 0;
+					});
+					const expandedState = document.querySelector<HTMLElement>(
+						".music-player__state--expanded",
+					);
+					const result = {
+						expandedClipPath: expandedState
+							? getComputedStyle(expandedState).clipPath
+							: null,
+						toolTransforms,
+						toolsKeyframeCount: keyframes.length,
+						toolsTransitionDuration: Number(
+							effect?.getTiming().duration,
+						),
+					};
+					animation?.pause();
+					animation?.finish();
+					resolve(result);
+				});
+				const timeout = window.setTimeout(() => {
+					observer.disconnect();
+					resolve(null);
+				}, 2_000);
+				observer.observe(tools, {
+					attributes: true,
+					attributeFilter: ["data-layout-motion"],
+				});
+				(button as HTMLElement).click();
+			});
+		});
+	expect(expandedTransition).not.toBeNull();
+	if (!expandedTransition) throw new Error("Missing player layout animation");
+	expect(expandedTransition.expandedClipPath).toContain("inset(");
+	expect(expandedTransition.toolsTransitionDuration).toBe(420);
+	expect(expandedTransition.toolsKeyframeCount).toBe(31);
+	expect(expandedTransition.toolTransforms).toHaveLength(31);
+	expect(Math.abs(expandedTransition.toolTransforms[0] ?? 0)).toBeGreaterThan(
+		20,
+	);
+	expect(expandedTransition.toolTransforms.at(-1)).toBe(0);
+
+	const panel = page.locator("#music-player-panel");
+	await expect(panel).toBeVisible();
+	await expect(miniPlayer).not.toBeVisible();
+	await expect(panel.locator(".song-title")).toHaveText("Test Song");
+	await page.waitForTimeout(100);
+	const collapseTransition = await panel
+		.getByTitle("收起播放器")
+		.evaluate(async (button) => {
+			const samples: Array<{
+				keyframeCount: number | null;
+				top: number;
+				transitionDuration: number | null;
+			}> = [];
+			const startedAt = performance.now();
+			(button as HTMLButtonElement).click();
+
+			await new Promise<void>((resolve) => {
+				const sample = (now: number) => {
+					const toolsRail = document.querySelector<HTMLElement>(
+						".floating-tools__rail",
+					);
+					const toolsSwitch = document.getElementById(
+						"floating-tools-switch",
+					);
+					const animation = toolsRail?.getAnimations()[0];
+					const effect = animation?.effect as KeyframeEffect | null;
+					if (toolsSwitch) {
+						samples.push({
+							keyframeCount:
+								effect?.getKeyframes().length ?? null,
+							top: toolsSwitch.getBoundingClientRect().top,
+							transitionDuration:
+								Number(effect?.getTiming().duration) || null,
+						});
+					}
+					if (now - startedAt >= 360) {
+						resolve();
+						return;
+					}
+					requestAnimationFrame(sample);
+				};
+				requestAnimationFrame(sample);
+			});
+
+			return samples;
+		});
+	const collapseTops = collapseTransition.map(({ top }) => top);
+	expect(
+		new Set(collapseTops.map((top) => top.toFixed(2))).size,
+	).toBeGreaterThanOrEqual(2);
+	expect(collapseTops.at(-1)).toBeGreaterThan(collapseTops[0]);
+	expect(
+		collapseTransition.some(
+			({ transitionDuration }) => transitionDuration === 420,
+		),
+	).toBe(true);
+	expect(
+		collapseTransition.some(({ keyframeCount }) => keyframeCount === 31),
+	).toBe(true);
+	await expect(panel).not.toBeVisible();
+	await expect(miniPlayer).toBeVisible();
+	await expect(page.locator(".music-player__state")).toHaveCount(1);
+
+	await miniPlayer.getByRole("button", { name: "展开音乐播放器" }).click();
+	await expect(panel).toBeVisible();
+	const playOrderButton = panel.locator("[data-play-order]");
+	await expect(playOrderButton).toHaveAttribute(
+		"data-play-order",
+		"sequential",
+	);
+	await playOrderButton.click();
+	await expect(playOrderButton).toHaveAttribute("data-play-order", "shuffle");
+	await expect(playOrderButton).toHaveAttribute("aria-pressed", "true");
+	await playOrderButton.click();
+	await expect(playOrderButton).toHaveAttribute(
+		"data-play-order",
+		"sequential",
+	);
+	const playButton = panel.getByRole("button", {
+		name: "播放",
+		exact: true,
+	});
+	await expect(playButton).toBeEnabled();
+	await playButton.click();
+	await expect(tools).toHaveAttribute("data-music-playing", "true");
+	await expect(tools).toHaveAttribute("data-music-loading", "false");
+	await expect(musicSwitch.locator(".local-icon")).toHaveCSS(
+		"animation-name",
+		"floating-music-note-beat",
+	);
+	await page.locator("#floating-tools-switch").click();
+	await musicSwitch.click();
+	await expect(musicSwitch).toHaveAttribute("aria-pressed", "false");
+	await expect(panel).not.toBeVisible();
+	await expect(page.locator(".music-player")).not.toBeVisible();
+
+	await musicSwitch.click();
+	await expect(musicSwitch).toHaveAttribute("aria-pressed", "true");
+	await expect(panel).toBeVisible();
+
+	await panel.getByTitle("收起播放器").click();
+	await expect(panel).not.toBeVisible();
+	await expect(miniPlayer).toBeVisible();
+	await miniPlayer.getByRole("button", { name: "暂停" }).click();
+	await expect(tools).toHaveAttribute("data-music-playing", "false");
+	await expect(miniPlayer).toBeVisible();
+	const compactTransition = await miniPlayer
+		.getByTitle("收起播放器")
+		.evaluate(async (button) => {
+			const player = document.querySelector<HTMLElement>(".music-player");
+			if (!player) throw new Error("Music player container is missing");
+
+			const initialRect = player.getBoundingClientRect();
+			const frames: Array<{
+				height: number;
+				miniClipPath: string | null;
+				miniWidth: number | null;
+				width: number;
+			}> = [
+				{
+					height: initialRect.height,
+					miniClipPath: null,
+					miniWidth: initialRect.width,
+					width: initialRect.width,
+				},
+			];
+			const startedAt = performance.now();
+			(button as HTMLButtonElement).click();
+
+			await new Promise<void>((resolve) => {
+				const sample = (now: number) => {
+					const rect = player.getBoundingClientRect();
+					const miniState = player.querySelector<HTMLElement>(
+						".music-player__state--mini",
+					);
+					const miniStyle = miniState
+						? getComputedStyle(miniState)
+						: null;
+					frames.push({
+						height: rect.height,
+						miniClipPath: miniStyle?.clipPath ?? null,
+						miniWidth: miniState?.offsetWidth ?? null,
+						width: rect.width,
+					});
+					if (now - startedAt >= 320) {
+						resolve();
+						return;
+					}
+					requestAnimationFrame(sample);
+				};
+				requestAnimationFrame(sample);
+			});
+
+			return {
+				frames,
+				transitionProperty: getComputedStyle(player).transitionProperty,
+			};
+		});
+	expect(compactTransition.transitionProperty).toContain("height");
+	expect(compactTransition.transitionProperty).toContain("width");
+	expect(compactTransition.frames[0].height).toBeGreaterThanOrEqual(70);
+	expect(compactTransition.frames.at(-1)?.height).toBeCloseTo(72, 0);
+	expect(compactTransition.frames.at(-1)?.width).toBeLessThanOrEqual(56);
+	expect(
+		compactTransition.frames.every(
+			({ height }) => Math.abs(height - 72) <= 1,
+		),
+	).toBe(true);
+	expect(
+		compactTransition.frames
+			.map(({ miniWidth }) => miniWidth)
+			.filter((width): width is number => width !== null)
+			.every((width) => width >= 279),
+	).toBe(true);
+	const miniClipPathFrames = compactTransition.frames
+		.map(({ miniClipPath }) => miniClipPath)
+		.filter((clipPath): clipPath is string => clipPath !== null);
+	expect(
+		miniClipPathFrames.some((clipPath) => clipPath.includes("ellipse(")),
+	).toBe(true);
+	await expect(hiddenOrb).not.toHaveClass(/opacity-0/);
+	await expect(hiddenOrb.locator(".orb-player__cover")).toHaveAttribute(
+		"src",
+		"/assets/music/cover/xryx.jpg",
+	);
+	const revealTransition = await hiddenOrb.evaluate(async (orb) => {
+		const frames: Array<{
+			coverOpacity: number | null;
+			miniClipPath: string | null;
+			orbTranslateX: number | null;
+		}> = [];
+		const startedAt = performance.now();
+		(orb as HTMLElement).click();
+
+		await new Promise<void>((resolve) => {
+			const sample = (now: number) => {
+				const hiddenState = document.querySelector<HTMLElement>(
+					".music-player__state--hidden",
+				);
+				const miniState = document.querySelector<HTMLElement>(
+					".music-player__state--mini",
+				);
+				const miniCover = document.querySelector<HTMLElement>(
+					".mini-player__cover",
+				);
+				frames.push({
+					coverOpacity: miniCover
+						? Number(getComputedStyle(miniCover).opacity)
+						: null,
+					miniClipPath: miniState
+						? getComputedStyle(miniState).clipPath
+						: null,
+					orbTranslateX: hiddenState
+						? new DOMMatrix(getComputedStyle(hiddenState).transform)
+								.e
+						: null,
+				});
+				if (now - startedAt >= 480) {
+					resolve();
+					return;
+				}
+				requestAnimationFrame(sample);
+			};
+			requestAnimationFrame(sample);
+		});
+
+		return frames;
+	});
+	const revealClipPaths = revealTransition
+		.map(({ miniClipPath }) => miniClipPath)
+		.filter((clipPath): clipPath is string => clipPath !== null);
+	const coverOpacities = revealTransition
+		.map(({ coverOpacity }) => coverOpacity)
+		.filter((opacity): opacity is number => opacity !== null);
+	const orbTranslateX = revealTransition
+		.map(({ orbTranslateX }) => orbTranslateX)
+		.filter((value): value is number => value !== null);
+	expect(
+		revealClipPaths.some((clipPath) => clipPath.includes("ellipse(")),
+	).toBe(true);
+	expect(Math.max(...orbTranslateX.map(Math.abs))).toBeLessThanOrEqual(0.1);
+	expect(Math.min(...coverOpacities)).toBeLessThan(0.25);
+	expect(Math.max(...coverOpacities)).toBeGreaterThan(0.9);
+	await expect(miniPlayer).toBeVisible();
+});
+
+test("hidden music control moves from playlist loading fallback to the first cover", async ({
+	page,
+}) => {
+	let releasePlaylistRequest = () => {};
+	const playlistRequestGate = new Promise<void>((resolve) => {
+		releasePlaylistRequest = resolve;
+	});
+	await page.route("https://meting.whynotsnow.com/**", async (route) => {
+		await playlistRequestGate;
+		await route.fulfill({
+			contentType: "application/json",
+			json: [
+				{
+					artist: "Loading Artist",
+					id: 1,
+					name: "Loaded Song",
+					pic: "/assets/music/cover/xryx.jpg",
+					url: "/assets/music/url/xryx.mp3",
+				},
+			],
+		});
+	});
+	await gotoPage(page, "/");
+	await waitForFloatingToolsClient(page);
+
+	const hiddenOrb = page.locator(".orb-player");
+	const fallback = hiddenOrb.locator(".orb-player__fallback-icon");
+	await expect(hiddenOrb).toBeVisible();
+	await expect(hiddenOrb).toHaveClass(/orb-player--fallback/);
+	await expect(fallback).toHaveClass(/orb-player__fallback-icon--loading/);
+	await expect(fallback).toHaveCSS(
+		"animation-name",
+		"fallback-music-loading",
+	);
+
+	releasePlaylistRequest();
+	await expect(hiddenOrb.locator(".orb-player__cover")).toHaveAttribute(
+		"src",
+		"/assets/music/cover/xryx.jpg",
+	);
+	await expect(fallback).toHaveCount(0);
+});
+
+test("hidden music control falls back to the themed icon when cover loading fails", async ({
+	page,
+}) => {
+	await mockMusicPlaylist(page, [
+		{
+			artist: "Fallback Artist",
+			id: 1,
+			name: "Fallback Song",
+			pic: "/assets/music/cover/missing-cover.jpg",
+			url: "/assets/music/url/xryx.mp3",
+		},
+	]);
+	await page.addInitScript(() => {
+		HTMLMediaElement.prototype.play = function () {
+			this.dispatchEvent(new Event("play"));
+			return Promise.resolve();
+		};
+	});
+	await gotoPage(page, "/");
+	await waitForFloatingToolsClient(page);
+
+	const miniPlayer = await openMiniPlayer(page);
+	await miniPlayer.getByRole("button", { name: "展开音乐播放器" }).click();
+	const panel = page.locator("#music-player-panel");
+	await expect(panel.locator(".song-title")).toHaveText("Fallback Song");
+	await panel.getByRole("button", { name: "播放", exact: true }).click();
+	await panel.getByTitle("隐藏播放器").click();
+
+	const hiddenOrb = page.locator(".orb-player");
+	await expect(hiddenOrb).toHaveClass(/orb-player--fallback/);
+	await expect(hiddenOrb.locator(".orb-player__cover")).toHaveCount(0);
+	await expect(hiddenOrb.locator(".orb-player__fallback-icon")).toBeVisible();
+});
+
+test("floating tools keeps a safe mobile touch target", async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await gotoPage(page, "/");
+	await waitForFloatingToolsClient(page);
+
+	const geometry = await page
+		.locator("#floating-tools-switch")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return {
+				width: rect.width,
+				height: rect.height,
+				right: window.innerWidth - rect.right,
+				bottom: window.innerHeight - rect.bottom,
+			};
+		});
+
+	expect(geometry.width).toBeGreaterThanOrEqual(44);
+	expect(geometry.height).toBeGreaterThanOrEqual(44);
+	expect(geometry.right).toBeGreaterThanOrEqual(12);
+	expect(geometry.bottom).toBeGreaterThanOrEqual(12);
+
+	await page.locator("#floating-tools-switch").click();
+	await page.locator("#display-settings-switch").click();
+	await expect(page.locator("#display-setting")).not.toHaveClass(
+		/float-panel-closed/,
+	);
+	const panelGeometry = await page
+		.locator("#display-setting")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return {
+				bottom: window.innerHeight - rect.bottom,
+				height: rect.height,
+				left: rect.left,
+				right: window.innerWidth - rect.right,
+			};
+		});
+	expect(panelGeometry.left).toBeGreaterThanOrEqual(8);
+	expect(panelGeometry.right).toBeGreaterThanOrEqual(8);
+	expect(panelGeometry.bottom).toBeGreaterThanOrEqual(8);
+	expect(panelGeometry.height).toBeLessThanOrEqual(844 - 16);
+});
+
+test("floating tools controls the Live2D companion preference", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1440, height: 900 });
+	const iconifyRequests: string[] = [];
+	page.on("request", (request) => {
+		if (request.url().startsWith("https://api.iconify.design/")) {
+			iconifyRequests.push(request.url());
+		}
+	});
+	await page.route(
+		"**/live2d-companion/models/14jiang/model.moc3",
+		async (route) => {
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			await route.continue();
+		},
+		{ times: 1 },
+	);
+	await page.addInitScript(() => {
+		if (window.top !== window) return;
+		localStorage.removeItem("live2d-companion-mounted");
+		localStorage.removeItem("live2d-companion-collapsed");
+		localStorage.removeItem("live2d-companion-anchor");
+		localStorage.removeItem("live2d-companion-model-index");
+	});
+	await gotoPage(page, "/");
+	await waitForFloatingToolsClient(page);
+
+	await expect(page.locator("#floating-tools-switch")).toBeVisible({
+		timeout: 15_000,
+	});
+	await expect(page.locator(".live2d-companion")).toHaveAttribute(
+		"data-live2d-companion-mounted",
+		"true",
+		{ timeout: 15_000 },
+	);
+	await expect(page.locator(".live2d-companion")).toHaveClass(
+		/live2d-companion--loading/,
+	);
+	await expect(page.locator(".live2d-companion__avatar")).toBeVisible();
+	const loadingAvatarGeometry = await page
+		.locator(".live2d-companion__avatar")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { height: rect.height, width: rect.width };
+		});
+	expect(loadingAvatarGeometry.width).toBeCloseTo(48, 0);
+	expect(loadingAvatarGeometry.height).toBeCloseTo(48, 0);
+	await page.locator("#floating-tools-switch").click({ force: true });
+	const toggle = page.getByRole("button", { name: "隐藏看板娘" });
+	await expect(toggle).toBeVisible();
+	await expect(toggle).toHaveAttribute("aria-pressed", "true");
+	await expect(toggle.locator(".local-icon")).toHaveAttribute(
+		"data-local-icon",
+		"material-symbols:face-retouching-natural-rounded",
+	);
+	await expect(page.locator("#l2d-iframe")).toHaveCount(1);
+	const companionGeometry = await page
+		.locator(".live2d-companion")
+		.evaluate((el) => {
+			const rect = el.getBoundingClientRect();
+			const oldTransparentLayerPoint = {
+				x: rect.left + 8,
+				y: rect.bottom - 500,
+			};
+			const hit = document.elementFromPoint(
+				oldTransparentLayerPoint.x,
+				oldTransparentLayerPoint.y,
+			) as HTMLElement | null;
+			return {
+				height: rect.height,
+				hitId: hit?.id ?? "",
+				hitClass: hit?.className.toString() ?? "",
+			};
+		});
+	expect(companionGeometry.height).toBeLessThanOrEqual(352);
+	expect(companionGeometry.hitId).not.toBe("l2d-iframe");
+	expect(companionGeometry.hitClass).not.toContain("live2d-companion");
+	await toggle.click();
+
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("live2d-companion-mounted"),
+			),
+		)
+		.toBe("0");
+	await expect(page.locator(".live2d-companion")).toHaveCount(0);
+	await expect(page.locator("#l2d-iframe")).toHaveCount(0);
+
+	const showToggle = page.getByRole("button", { name: "显示看板娘" });
+	await expect(showToggle).toHaveAttribute("aria-pressed", "false");
+	await expect(showToggle.locator(".local-icon")).toHaveAttribute(
+		"data-local-icon",
+		"material-symbols:face-retouching-off-rounded",
+	);
+	await showToggle.click();
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("live2d-companion-mounted"),
+			),
+		)
+		.toBe("1");
+	await expect(page.locator(".live2d-companion")).toHaveAttribute(
+		"data-live2d-companion-mounted",
+		"true",
+	);
+	await expect(page.locator("#l2d-iframe")).toHaveCount(1);
+	await expect(page.locator("#l2d-iframe")).not.toHaveAttribute(
+		"data-config",
+	);
+	await expect(page.locator("#l2d-iframe")).toHaveAttribute(
+		"data-width",
+		"280",
+	);
+	await expect(page.locator(".live2d-companion")).toHaveClass(
+		/live2d-companion--loaded/,
+	);
+	await expect(
+		page.frameLocator("#l2d-iframe").getByRole("button", {
+			name: "休眠",
+		}),
+	).toHaveCount(0);
+	await expect(
+		page.frameLocator("#l2d-iframe").getByText("正在加载"),
+	).toHaveCount(0);
+	const canvasGeometry = await page
+		.frameLocator("#l2d-iframe")
+		.locator("canvas")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { height: rect.height, width: rect.width };
+		});
+	expect(canvasGeometry.width).toBeCloseTo(280, 0);
+	expect(canvasGeometry.height).toBeCloseTo(280, 0);
+	const expressions = await page
+		.frameLocator("#l2d-iframe")
+		.locator("canvas")
+		.evaluate(() => {
+			const frameWindow = window as Window & {
+				widgetInstance?: {
+					l2d?: {
+						getExpressions: () => string[];
+						getParams: () => Array<{ id: string; value: number }>;
+						setExpression: (name: string) => void;
+					};
+				};
+				__lastLive2DExpression?: string;
+			};
+			const l2d = frameWindow.widgetInstance?.l2d;
+			const originalSetExpression = l2d?.setExpression.bind(l2d);
+			if (l2d && originalSetExpression) {
+				l2d.setExpression = (name: string) => {
+					frameWindow.__lastLive2DExpression = name;
+					originalSetExpression(name);
+				};
+			}
+			return l2d?.getExpressions() ?? [];
+		});
+	expect(expressions).toContain("smile");
+	expect(expressions).toContain("heart-combo");
+	expect(expressions).not.toContain("hide-watermark");
+	expect(expressions).toHaveLength(22);
+	await expect(
+		page
+			.frameLocator("#l2d-iframe")
+			.getByRole("button", { name: "切换模型" }),
+	).toBeVisible();
+	await expect(
+		page
+			.frameLocator("#l2d-iframe")
+			.getByRole("button", { name: "切换模型" }),
+	).toHaveAttribute("data-local-icon", "material-symbols:swap-horiz-rounded");
+	const getCompanionMenuState = () =>
+		page
+			.frameLocator("#l2d-iframe")
+			.locator(".live2d-companion-menu")
+			.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return {
+					opacity: style.opacity,
+					pointerEvents: style.pointerEvents,
+				};
+			});
+	await expect.poll(getCompanionMenuState).toEqual({
+		opacity: "0",
+		pointerEvents: "none",
+	});
+	await page.frameLocator("#l2d-iframe").locator("canvas").hover();
+	await expect.poll(getCompanionMenuState).toEqual({
+		opacity: "1",
+		pointerEvents: "auto",
+	});
+	await expect(
+		page
+			.frameLocator("#l2d-iframe")
+			.getByRole("button", { name: "全部表情" }),
+	).toBeVisible();
+	await expect(
+		page
+			.frameLocator("#l2d-iframe")
+			.getByRole("button", { name: "全部表情" }),
+	).toHaveAttribute("title", "全部表情");
+	await expectCompanionMenuIcon(
+		page,
+		"全部表情",
+		"material-symbols:grid-view-rounded",
+	);
+	await expect(
+		page.frameLocator("#l2d-iframe").getByRole("button", {
+			name: "微笑",
+		}),
+	).toBeVisible();
+	await expect(
+		page.frameLocator("#l2d-iframe").getByRole("button", {
+			name: "微笑",
+		}),
+	).toHaveAttribute("title", "微笑");
+	await expectCompanionMenuIcon(
+		page,
+		"微笑",
+		"material-symbols:sentiment-satisfied-rounded",
+	);
+	await expectCompanionMenuIcon(
+		page,
+		"心动",
+		"material-symbols:mood-heart-rounded",
+	);
+	await expectCompanionMenuIcon(
+		page,
+		"生气",
+		"material-symbols:sentiment-frustrated-rounded",
+	);
+	await expectCompanionMenuIcon(
+		page,
+		"晕乎",
+		"material-symbols:face-shake-rounded",
+	);
+	await expectCompanionMenuIcon(
+		page,
+		"脸红",
+		"material-symbols:sentiment-excited-rounded",
+	);
+	await expect(
+		page.frameLocator("#l2d-iframe").getByRole("button", {
+			name: "冒汗",
+		}),
+	).toHaveCount(0);
+	await page
+		.frameLocator("#l2d-iframe")
+		.getByRole("button", { name: "全部表情" })
+		.click();
+	await expect(
+		page
+			.locator(".live2d-companion__expression-panel")
+			.getByRole("button", { name: "X 嘴" }),
+	).toBeVisible();
+	const expressionPanelGeometry = await page
+		.locator(".live2d-companion__expression-panel")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			const style = getComputedStyle(element);
+			const iframe =
+				document.querySelector<HTMLIFrameElement>("#l2d-iframe");
+			const iframeRect = iframe?.getBoundingClientRect();
+			const canvas = iframe?.contentDocument?.querySelector("canvas");
+			const canvasRect = canvas?.getBoundingClientRect();
+			const canvasRight =
+				iframeRect && canvasRect
+					? iframeRect.left + canvasRect.right
+					: undefined;
+			const buttonRect = iframe?.contentDocument
+				?.querySelector<HTMLElement>(
+					"#live2d-companion-expression-panel-toggle",
+				)
+				?.getBoundingClientRect();
+			const panelTopGap =
+				iframeRect && buttonRect
+					? rect.top - (iframeRect.top + buttonRect.top)
+					: Number.POSITIVE_INFINITY;
+			return {
+				buttonTop: buttonRect?.top ?? Number.POSITIVE_INFINITY,
+				buttonCount: element.querySelectorAll("button").length,
+				hasVerticalOverflow:
+					element.scrollHeight > element.clientHeight,
+				overflowY: style.overflowY,
+				panelTopGap,
+				rightOfCanvas: canvasRight ? rect.left >= canvasRight : true,
+			};
+		});
+	expect(expressionPanelGeometry.buttonCount).toBe(22);
+	expect(expressionPanelGeometry.hasVerticalOverflow).toBe(false);
+	expect(expressionPanelGeometry.overflowY).toBe("visible");
+	expect(Math.abs(expressionPanelGeometry.panelTopGap)).toBeLessThanOrEqual(
+		2,
+	);
+	expect(expressionPanelGeometry.rightOfCanvas).toBe(true);
+	await expect(
+		page
+			.locator(".live2d-companion__expression-panel")
+			.getByRole("button", { name: "X 嘴" }),
+	).toHaveAttribute("title", "X 嘴");
+	await expect(
+		page
+			.locator(".live2d-companion__expression-panel")
+			.getByRole("button", { name: "冒汗" }),
+	).toBeVisible();
+	await expect.poll(getCompanionMenuState).toEqual({
+		opacity: "1",
+		pointerEvents: "auto",
+	});
+	await page
+		.locator(".live2d-companion__expression-panel")
+		.getByRole("button", { name: "X 嘴" })
+		.click();
+	await expect
+		.poll(() =>
+			page
+				.frameLocator("#l2d-iframe")
+				.locator("body")
+				.evaluate(
+					() =>
+						(
+							window as Window & {
+								__lastLive2DExpression?: string;
+							}
+						).__lastLive2DExpression,
+				),
+		)
+		.toBe("x-mouth");
+	await expect(
+		page.locator(".live2d-companion__expression-panel"),
+	).toBeVisible();
+	await expect.poll(getCompanionMenuState).toEqual({
+		opacity: "1",
+		pointerEvents: "auto",
+	});
+	await page
+		.frameLocator("#l2d-iframe")
+		.getByRole("button", { name: "心动" })
+		.click();
+	await expect(
+		page.locator(".live2d-companion__expression-panel"),
+	).toHaveCount(0);
+	await expect
+		.poll(() =>
+			page
+				.frameLocator("#l2d-iframe")
+				.locator("body")
+				.evaluate(
+					() =>
+						(
+							window as Window & {
+								__lastLive2DExpression?: string;
+							}
+						).__lastLive2DExpression,
+				),
+		)
+		.toBe("heart-combo");
+	const watermarkParameter = await page
+		.frameLocator("#l2d-iframe")
+		.locator("canvas")
+		.evaluate(() => {
+			const frameWindow = window as Window & {
+				widgetInstance?: {
+					l2d?: {
+						getParams: () => Array<{ id: string; value: number }>;
+					};
+				};
+			};
+			return frameWindow.widgetInstance?.l2d
+				?.getParams()
+				.find((parameter) => parameter.id === "CheekPuff2");
+		});
+	expect(watermarkParameter?.value).toBeCloseTo(1, 2);
+	await page.evaluate(() => {
+		window.dispatchEvent(
+			new CustomEvent("live2d-companion-command", {
+				detail: {
+					command: {
+						type: "expression",
+						name: "smile",
+					},
+				},
+			}),
+		);
+	});
+	await expect
+		.poll(() =>
+			page
+				.frameLocator("#l2d-iframe")
+				.locator("body")
+				.evaluate(
+					() =>
+						(
+							window as Window & {
+								__lastLive2DExpression?: string;
+							}
+						).__lastLive2DExpression,
+				),
+		)
+		.toBe("smile");
+	const collapseButtonGeometry = await page
+		.frameLocator("#l2d-iframe")
+		.getByRole("button", { name: "收起看板娘" })
+		.evaluate((element) => {
+			const buttonRect = element.getBoundingClientRect();
+			const buttonStyle = getComputedStyle(element);
+			const canvas = document.querySelector("canvas");
+			const root = canvas?.parentElement;
+			const rootDivs = root
+				? Array.from(root.children).filter(
+						(child) => child.tagName === "DIV",
+					)
+				: [];
+			return {
+				buttonHeight: buttonRect.height,
+				buttonWidth: buttonRect.width,
+				borderWidth: buttonStyle.borderTopWidth,
+				backgroundColor: buttonStyle.backgroundColor,
+				iconName: element.getAttribute("data-local-icon"),
+				isInWidgetMenu: rootDivs[1] === element.parentElement,
+				menuChildCount: element.parentElement?.children.length ?? 0,
+				svgCount: element.querySelectorAll("svg").length,
+				text: element.textContent?.trim() ?? "",
+				transform: buttonStyle.transform,
+			};
+		});
+	expect(collapseButtonGeometry.buttonWidth).toBeCloseTo(24, 0);
+	expect(collapseButtonGeometry.buttonHeight).toBeCloseTo(24, 0);
+	expect(collapseButtonGeometry.iconName).toBe(
+		"material-symbols:collapse-content-rounded",
+	);
+	expect(collapseButtonGeometry.borderWidth).toBe("1px");
+	expect(collapseButtonGeometry.backgroundColor).not.toContain(
+		"96, 165, 250",
+	);
+	expect(collapseButtonGeometry.isInWidgetMenu).toBe(true);
+	expect(collapseButtonGeometry.menuChildCount).toBe(8);
+	expect(collapseButtonGeometry.svgCount).toBe(1);
+	expect(collapseButtonGeometry.text).toBe("");
+	expect(collapseButtonGeometry.transform).toBe("none");
+	expect(iconifyRequests).toHaveLength(0);
+	const widgetTipChrome = await page
+		.frameLocator("#l2d-iframe")
+		.locator(".live2d-companion-widget-tip")
+		.first()
+		.evaluate((element) => {
+			const style = getComputedStyle(element);
+			const rgb = style.backgroundColor.match(/\d+(\.\d+)?/g) ?? [];
+			const [red = 0, green = 0, blue = 0] = rgb.map(Number);
+			return {
+				backgroundColor: style.backgroundColor,
+				isNeutralBackground:
+					Math.abs(red - green) <= 8 && Math.abs(green - blue) <= 8,
+				maxWidth: style.maxWidth,
+				textAlign: style.textAlign,
+				whiteSpace: style.whiteSpace,
+			};
+		});
+	expect(widgetTipChrome.backgroundColor).not.toContain("96, 165, 250");
+	expect(widgetTipChrome.isNeutralBackground).toBe(true);
+	expect(widgetTipChrome.whiteSpace).toBe("normal");
+	expect(widgetTipChrome.textAlign).toBe("left");
+	expect(widgetTipChrome.maxWidth).not.toBe("200px");
+	await page.route(
+		"**/live2d-companion/models/NOIR/noir.moc3",
+		async (route) => {
+			await new Promise((resolve) => setTimeout(resolve, 200));
+			await route.continue();
+		},
+		{ times: 1 },
+	);
+	await page
+		.frameLocator("#l2d-iframe")
+		.getByRole("button", { name: "切换模型" })
+		.click();
+	await expect
+		.poll(
+			() =>
+				page
+					.frameLocator("#l2d-iframe")
+					.locator("canvas")
+					.evaluate(
+						() =>
+							(
+								window as Window & {
+									widgetInstance?: {
+										l2d?: {
+											getExpressions: () => string[];
+										};
+									};
+								}
+							).widgetInstance?.l2d?.getExpressions() ?? [],
+					),
+			{ timeout: 15_000 },
+		)
+		.toEqual(["eyeclose", "quanquan", "tears", "white"]);
+	await expect(
+		page.frameLocator("#l2d-iframe").getByRole("button", { name: "闭眼" }),
+	).toBeVisible();
+	await expectCompanionMenuIcon(
+		page,
+		"闭眼",
+		"material-symbols:visibility-off-outline-rounded",
+	);
+	await expectCompanionMenuIcon(
+		page,
+		"圈圈眼",
+		"material-symbols:cyclone-rounded",
+	);
+	await expectCompanionMenuIcon(
+		page,
+		"眼泪",
+		"material-symbols:water-drop-rounded",
+	);
+	await expectCompanionMenuIcon(
+		page,
+		"变白",
+		"material-symbols:invert-colors-rounded",
+	);
+	await expect(
+		page.frameLocator("#l2d-iframe").getByRole("button", { name: "变白" }),
+	).toHaveAttribute("title", "变白");
+	await expect(
+		page
+			.frameLocator("#l2d-iframe")
+			.getByRole("button", { name: "全部表情" }),
+	).toHaveCount(0);
+	await expect(
+		page.locator(".live2d-companion__expression-panel"),
+	).toHaveCount(0);
+	const noirActionGeometry = await page
+		.frameLocator("#l2d-iframe")
+		.getByRole("button", { name: "变白" })
+		.evaluate((element) => {
+			const menu = element.parentElement;
+			const menuStyle = menu ? getComputedStyle(menu) : undefined;
+			return {
+				menuChildCount: menu?.children.length ?? 0,
+				menuTop: menuStyle?.top ?? "",
+				transform: getComputedStyle(element).transform,
+			};
+		});
+	expect(noirActionGeometry.menuChildCount).toBe(6);
+	expect(noirActionGeometry.menuTop).toBe("14px");
+	expect(noirActionGeometry.transform).toBe("none");
+	await page.mouse.move(720, 120);
+	await expect(
+		page.locator(".live2d-companion__expression-panel"),
+	).toHaveCount(0);
+	expect(iconifyRequests).toHaveLength(0);
+	await page.evaluate(() => {
+		window.dispatchEvent(
+			new CustomEvent("live2d-companion-command", {
+				detail: {
+					command: {
+						type: "message",
+						text: "组件交互测试：这是一段用于验证长文本换行和高度限制的消息内容，应该在气泡内部自然换行，而不是继续使用蓝色背景或把 iframe 撑得过高。",
+					},
+				},
+			}),
+		);
+	});
+	await expect(
+		page.frameLocator("#l2d-iframe").locator("#live2d-companion-message"),
+	).toContainText("组件交互测试");
+	const messageChrome = await page
+		.frameLocator("#l2d-iframe")
+		.locator("#live2d-companion-message")
+		.evaluate((element) => {
+			const style = getComputedStyle(element);
+			const rgb = style.backgroundColor.match(/\d+(\.\d+)?/g) ?? [];
+			const [red = 0, green = 0, blue = 0] = rgb.map(Number);
+			return {
+				backgroundColor: style.backgroundColor,
+				borderWidth: style.borderTopWidth,
+				height: element.getBoundingClientRect().height,
+				isNeutralBackground:
+					Math.abs(red - green) <= 8 && Math.abs(green - blue) <= 8,
+				overflowY: style.overflowY,
+				textAlign: style.textAlign,
+				top: style.top,
+				whiteSpace: style.whiteSpace,
+				width: element.getBoundingClientRect().width,
+			};
+		});
+	expect(messageChrome.top).toBe("32px");
+	expect(messageChrome.borderWidth).toBe("1px");
+	expect(messageChrome.backgroundColor).not.toContain("96, 165, 250");
+	expect(messageChrome.isNeutralBackground).toBe(true);
+	expect(messageChrome.textAlign).toBe("left");
+	expect(messageChrome.whiteSpace).toBe("normal");
+	expect(messageChrome.overflowY).toBe("auto");
+	expect(messageChrome.width).toBeLessThanOrEqual(256);
+	expect(messageChrome.height).toBeLessThanOrEqual(108);
+
+	const postLive2DDragEvent = async (
+		type: "l2d-drag-start" | "l2d-drag-move" | "l2d-drag-end",
+		point?: { x: number; y: number },
+	) => {
+		const live2dFrame = page
+			.frames()
+			.find((frame) =>
+				frame.url().includes("/live2d-companion/live2d-host.html"),
+			);
+		if (!live2dFrame) {
+			throw new Error("Live2D iframe was not available for drag test.");
+		}
+		await live2dFrame.evaluate(
+			({ dragType, dragPoint }) => {
+				parent.postMessage(
+					{
+						type: dragType,
+						...(dragPoint ? { point: dragPoint } : {}),
+					},
+					"*",
+				);
+			},
+			{ dragType: type, dragPoint: point },
+		);
+	};
+	await postLive2DDragEvent("l2d-drag-start", { x: 140, y: 240 });
+	await postLive2DDragEvent("l2d-drag-move", { x: 140, y: -1000 });
+	await postLive2DDragEvent("l2d-drag-end");
+	const topClampedExpandedState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => element.getBoundingClientRect().top);
+	expect(topClampedExpandedState).toBeGreaterThanOrEqual(0);
+	await postLive2DDragEvent("l2d-drag-start", { x: 140, y: 120 });
+	await postLive2DDragEvent("l2d-drag-move", { x: 140, y: 2000 });
+	await postLive2DDragEvent("l2d-drag-end");
+	const bottomClampedExpandedState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return window.innerHeight - rect.bottom;
+		});
+	expect(bottomClampedExpandedState).toBeGreaterThanOrEqual(0);
+
+	await page.locator("#l2d-iframe").evaluate((iframe) => {
+		const frame = iframe as HTMLIFrameElement;
+		frame.contentDocument
+			?.querySelector<HTMLButtonElement>("#live2d-companion-collapse")
+			?.click();
+	});
+	await expect(page.locator(".live2d-companion")).toHaveCount(1);
+	await expect(page.locator(".live2d-companion")).toHaveClass(
+		/live2d-companion--collapsed/,
+	);
+	await expect(page.locator(".live2d-companion__avatar")).toBeVisible();
+	await expect(page.locator(".live2d-companion__avatar img")).toHaveAttribute(
+		"src",
+		"/live2d-companion/models/NOIR/avatar.png",
+	);
+	await expect(page.locator(".live2d-companion__avatar img")).toHaveAttribute(
+		"draggable",
+		"false",
+	);
+	const nativeDragPrevented = await page
+		.locator(".live2d-companion__avatar img")
+		.evaluate((element) => {
+			const event = new DragEvent("dragstart", {
+				bubbles: true,
+				cancelable: true,
+			});
+			return !element.dispatchEvent(event);
+		});
+	expect(nativeDragPrevented).toBe(true);
+	const collapsedIframeGeometry = await page
+		.locator("#l2d-iframe")
+		.evaluate((iframe) => {
+			const rect = iframe.getBoundingClientRect();
+			return {
+				display: window.getComputedStyle(iframe).display,
+				height: rect.height,
+				width: rect.width,
+			};
+		});
+	expect(collapsedIframeGeometry.display).toBe("none");
+	expect(collapsedIframeGeometry.height).toBe(0);
+	expect(collapsedIframeGeometry.width).toBe(0);
+	await expect(page.getByText("正在休息")).toHaveCount(0);
+	await expect(
+		page.frameLocator("#l2d-iframe").getByText("正在休眠"),
+	).toHaveCount(0);
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("live2d-companion-collapsed"),
+			),
+		)
+		.toBe("1");
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("live2d-companion-mounted"),
+			),
+		)
+		.toBe("1");
+
+	const avatarBox = await page
+		.locator(".live2d-companion__avatar")
+		.boundingBox();
+	expect(avatarBox).not.toBeNull();
+	if (!avatarBox) return;
+	const dragStart = {
+		x: avatarBox.x + avatarBox.width / 2,
+		y: avatarBox.y + avatarBox.height / 2,
+	};
+	await page.mouse.move(dragStart.x, dragStart.y);
+	await page.mouse.down();
+	await page.mouse.move(360, 260, { steps: 8 });
+	const draggingGeometry = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { left: rect.left, top: rect.top };
+		});
+	expect(draggingGeometry.left).toBe(0);
+	expect(draggingGeometry.top).toBeGreaterThanOrEqual(16);
+	expect(draggingGeometry.top).toBeLessThanOrEqual(260);
+	await page.mouse.up();
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("live2d-companion-anchor"),
+			),
+		)
+		.toBeTruthy();
+	const collapsedDragState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			const stored = localStorage.getItem("live2d-companion-anchor");
+			return {
+				left: rect.left,
+				top: rect.top,
+				stored: stored ? JSON.parse(stored) : null,
+			};
+		});
+	expect(collapsedDragState.left).toBe(0);
+	expect(collapsedDragState.top).toBeLessThan(avatarBox.y);
+	expect(collapsedDragState.stored).toMatchObject({
+		edge: "left",
+		centerY: collapsedDragState.top + avatarBox.height / 2,
+	});
+
+	const topDragStart = await page
+		.locator(".live2d-companion__avatar")
+		.boundingBox();
+	expect(topDragStart).not.toBeNull();
+	if (!topDragStart) return;
+	await page.mouse.move(
+		topDragStart.x + topDragStart.width / 2,
+		topDragStart.y + topDragStart.height / 2,
+	);
+	await page.mouse.down();
+	await page.mouse.move(24, 170, { steps: 8 });
+	const topDraggingState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { top: rect.top };
+		});
+	expect(topDraggingState.top).toBeGreaterThan(16);
+	await page.mouse.up();
+	await expect
+		.poll(() =>
+			page.locator(".live2d-companion").evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return rect.top;
+			}),
+		)
+		.toBeLessThanOrEqual(17);
+	await page.locator(".live2d-companion__avatar").click();
+	await expect(page.locator(".live2d-companion")).not.toHaveClass(
+		/live2d-companion--collapsed/,
+	);
+	const topExpandedState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { top: rect.top };
+		});
+	expect(topExpandedState.top).toBeCloseTo(16, 0);
+	await page.locator("#l2d-iframe").evaluate((iframe) => {
+		const frame = iframe as HTMLIFrameElement;
+		frame.contentDocument
+			?.querySelector<HTMLButtonElement>("#live2d-companion-collapse")
+			?.click();
+	});
+	await expect(page.locator(".live2d-companion")).toHaveClass(
+		/live2d-companion--collapsed/,
+	);
+	const topCollapsedAgainState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { top: rect.top };
+		});
+	expect(topCollapsedAgainState.top).toBeCloseTo(16, 0);
+
+	const bottomDragStart = await page
+		.locator(".live2d-companion__avatar")
+		.boundingBox();
+	expect(bottomDragStart).not.toBeNull();
+	if (!bottomDragStart) return;
+	await page.mouse.move(
+		bottomDragStart.x + bottomDragStart.width / 2,
+		bottomDragStart.y + bottomDragStart.height / 2,
+	);
+	await page.mouse.down();
+	await page.mouse.move(24, page.viewportSize()!.height - 170, {
+		steps: 8,
+	});
+	const bottomDraggingState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { bottom: window.innerHeight - rect.bottom };
+		});
+	expect(bottomDraggingState.bottom).toBeGreaterThan(16);
+	await page.mouse.up();
+	await expect
+		.poll(() =>
+			page.locator(".live2d-companion").evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return window.innerHeight - rect.bottom;
+			}),
+		)
+		.toBeLessThanOrEqual(17);
+
+	await page.locator(".live2d-companion__avatar").click();
+	await expect(page.locator(".live2d-companion")).not.toHaveClass(
+		/live2d-companion--collapsed/,
+	);
+	await expect.poll(getCompanionMenuState).toEqual({
+		opacity: "1",
+		pointerEvents: "auto",
+	});
+	const bottomExpandedState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { bottom: window.innerHeight - rect.bottom };
+		});
+	expect(bottomExpandedState.bottom).toBeCloseTo(16, 0);
+	await postLive2DDragEvent("l2d-drag-start", { x: 140, y: 120 });
+	await postLive2DDragEvent("l2d-drag-move", { x: 2000, y: 120 });
+	await postLive2DDragEvent("l2d-drag-end");
+	const rightBlockedExpandedState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { left: rect.left };
+		});
+	expect(rightBlockedExpandedState.left).toBeCloseTo(0, 0);
+	const firstExpandedTop = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => element.getBoundingClientRect().top);
+	await page.locator("#l2d-iframe").evaluate((iframe) => {
+		const frame = iframe as HTMLIFrameElement;
+		frame.contentDocument
+			?.querySelector<HTMLButtonElement>("#live2d-companion-collapse")
+			?.click();
+	});
+	await expect(page.locator(".live2d-companion")).toHaveClass(
+		/live2d-companion--collapsed/,
+	);
+	const bottomCollapsedAgainState = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => {
+			const rect = element.getBoundingClientRect();
+			return { bottom: window.innerHeight - rect.bottom };
+		});
+	expect(bottomCollapsedAgainState.bottom).toBeCloseTo(16, 0);
+	await page.locator(".live2d-companion__avatar").click();
+	await expect(page.locator(".live2d-companion")).not.toHaveClass(
+		/live2d-companion--collapsed/,
+	);
+	const secondExpandedTop = await page
+		.locator(".live2d-companion")
+		.evaluate((element) => element.getBoundingClientRect().top);
+	expect(secondExpandedTop).toBeCloseTo(firstExpandedTop, 0);
+	await expect
+		.poll(() =>
+			page.evaluate(() =>
+				localStorage.getItem("live2d-companion-collapsed"),
+			),
+		)
+		.toBe("0");
+});
+
+test("Live2D companion remains available on medium and small viewports", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 1024, height: 768 });
+	await page.addInitScript(() => {
+		if (window.top !== window) return;
+		localStorage.removeItem("live2d-companion-mounted");
+		localStorage.removeItem("live2d-companion-collapsed");
+		localStorage.removeItem("live2d-companion-anchor");
+		localStorage.removeItem("live2d-companion-model-index");
+	});
+	await gotoPage(page, "/");
+	await waitForFloatingToolsClient(page);
+
+	await expect(page.locator("#floating-tools-switch")).toBeVisible({
+		timeout: 15_000,
+	});
+	await page.locator("#floating-tools-switch").click({ force: true });
+	await expect(
+		page.getByRole("button", { name: "隐藏看板娘" }),
+	).toBeVisible();
+	await expect(page.locator(".live2d-companion")).toHaveCount(1);
+	await expect(page.locator("#l2d-iframe")).toHaveCount(1);
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(
+		page.getByRole("button", { name: "隐藏看板娘" }),
+	).toBeVisible();
+	await expect(page.locator(".live2d-companion")).toHaveCount(1);
+	await expect(page.locator("#l2d-iframe")).toHaveCount(1);
+});
+
+test("playlist attaches above the player and floating tools clears the full surface", async ({
+	page,
+}) => {
+	await mockMusicPlaylist(page);
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await gotoPage(page, "/");
+	await waitForFloatingToolsClient(page);
+
+	const miniPlayer = await openMiniPlayer(page);
+	await miniPlayer.getByRole("button", { name: "展开音乐播放器" }).click();
+	await expect(page.locator(".expanded-player")).toBeVisible();
+	await expect
+		.poll(() =>
+			page.evaluate(() => {
+				const tools = document
+					.getElementById("floating-tools-switch")
+					?.getBoundingClientRect();
+				const player = document
+					.querySelector<HTMLElement>(".expanded-player")
+					?.getBoundingClientRect();
+				return (
+					(player?.top ?? 0) -
+					(tools?.bottom ?? Number.POSITIVE_INFINITY)
+				);
+			}),
+		)
+		.toBeGreaterThanOrEqual(16);
+	await page
+		.locator("#music-player-panel")
+		.getByRole("button", { name: "播放列表" })
+		.click();
+	const trackingSamples = await page.evaluate(async () => {
+		const samples: number[] = [];
+		const startedAt = performance.now();
+		while (performance.now() - startedAt < 280) {
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+			const tools = document
+				.getElementById("floating-tools-switch")
+				?.getBoundingClientRect();
+			const playlist = document
+				.querySelector<HTMLElement>(".playlist-panel")
+				?.getBoundingClientRect();
+			if (tools && playlist && playlist.height > 1) {
+				samples.push(playlist.top - tools.bottom);
+			}
+		}
+		return {
+			minimumGap: Math.min(...samples),
+			sampleCount: samples.length,
+			transitionProperty: getComputedStyle(
+				document.getElementById("floating-tools")!,
+			).transitionProperty,
+		};
+	});
+	expect(trackingSamples.sampleCount).toBeGreaterThan(0);
+	expect(trackingSamples.minimumGap).toBeGreaterThanOrEqual(0);
+	expect(trackingSamples.transitionProperty).not.toContain("inset-block-end");
+	const playlist = page.locator(".playlist-panel");
+	await expect(playlist).toBeVisible();
+	await expect(
+		page.locator(".music-player__panel-stack > .playlist-panel"),
+	).toHaveCount(1);
+	await expect(page.locator("#floating-tools")).toHaveAttribute(
+		"data-music-expanded",
+		"true",
+	);
+
+	const geometry = await page.evaluate(() => {
+		const player = document
+			.querySelector<HTMLElement>(".expanded-player")
+			?.getBoundingClientRect();
+		const playlist = document
+			.querySelector<HTMLElement>(".playlist-panel")
+			?.getBoundingClientRect();
+		const playlistPosition = playlist
+			? getComputedStyle(document.querySelector(".playlist-panel")!)
+					.position
+			: "";
+		return {
+			playerTop: player?.top ?? 0,
+			playlistBottom: playlist?.bottom ?? Number.NEGATIVE_INFINITY,
+			playlistPosition,
+		};
+	});
+
+	expect(
+		Math.abs(geometry.playlistBottom - geometry.playerTop),
+	).toBeLessThanOrEqual(1);
+	expect(geometry.playlistPosition).not.toBe("fixed");
+	await expect
+		.poll(() =>
+			page.evaluate(() => {
+				const tools = document
+					.getElementById("floating-tools-switch")
+					?.getBoundingClientRect();
+				const playlist = document
+					.querySelector<HTMLElement>(".playlist-panel")
+					?.getBoundingClientRect();
+				return (
+					(tools?.bottom ?? Number.POSITIVE_INFINITY) -
+					(playlist?.top ?? 0)
+				);
+			}),
+		)
+		.toBeLessThanOrEqual(-8);
+});

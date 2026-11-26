@@ -1,0 +1,30 @@
+---
+import type { GetStaticPaths } from "astro";
+import MainGridLayout from "@/layouts/MainGridLayout.astro";
+import CategoryPage from "@components/category/CategoryPage.astro";
+import CategorySupport from "@components/category/CategorySupport.astro";
+import {
+	getCategoryPaginatedStaticPaths,
+	type CategoryPageProps,
+} from "@/services/category-page";
+
+export const getStaticPaths =
+	getCategoryPaginatedStaticPaths satisfies GetStaticPaths;
+
+/**
+ * params & props
+ */
+const { slug } = Astro.params;
+const { posts, pagination, categorySlug, categories, tagIndexUrl, support } =
+	Astro.props as CategoryPageProps;
+
+if (!slug) return Astro.redirect("/404");
+---
+
+<MainGridLayout layoutPolicy="listing">
+	<CategorySupport
+		slot="support"
+		support={support}
+	/>
+	<CategoryPage {posts} {pagination} {categories} {categorySlug} {tagIndexUrl} />
+</MainGridLayout>

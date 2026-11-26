@@ -1,0 +1,473 @@
+---
+import type { TocItem } from "./toc-data";
+import { renderDesktopTocShell } from "./toc-render";
+
+export interface Props {
+	class?: string;
+	items: TocItem[];
+	deferHeadings?: boolean;
+}
+
+const { items = [], deferHeadings = false } = Astro.props;
+const className = Astro.props.class;
+const tocItems = deferHeadings ? [] : items;
+const tocItemsJson = JSON.stringify(tocItems).replaceAll("<", "\\u003c");
+---
+
+<table-of-contents class:list={[className, "group hide-scrollbar"]} id="toc">
+	<script
+		is:inline
+		type="application/json"
+		data-toc-items
+		set:html={tocItemsJson}
+	/>
+	<Fragment set:html={renderDesktopTocShell(tocItems)} />
+	<div
+		id="active-indicator"
+		style="opacity: 0"
+		class="-z-10 absolute bg-(--toc-btn-hover) left-0 right-0 rounded-xl toc-active-indicator group-hover:bg-transparent border-2 border-(--toc-btn-hover) group-hover:border-(--toc-btn-active) border-dashed"
+	>
+	</div>
+</table-of-contents>
+
+<script>
+	import { buildTocItems, collectTocHeadings } from "./toc-data";
+	import {
+		getPostContentRoot,
+		getTocOptions,
+		onPostTocRefresh,
+		scrollToHeading,
+		type TocActiveTracker,
+		type TocItem,
+	} from "./toc-runtime";
+	import { renderDesktopTocShell } from "./toc-render";
+	import {
+		resolveDesktopTocViewState,
+		type DesktopTocRootsOnlyReason,
+		type DesktopTocTransitionType,
+		type DesktopTocViewState,
+	} from "./toc-desktop-state";
+	import { DesktopTocPresenter } from "./toc-desktop-presenter";
+	import {
+		getPostTocStore,
+		type TocStoreReason,
+		type TocStoreSnapshot,
+	} from "./toc-store";
+
+	const TOC_BOUNDARY_MIN_ITEMS = 6;
+	const TOC_BOUNDARY_MIN_ROOTS = 2;
+	const TOC_BOUNDARY_MIN_VIEWPORTS = 1.5;
+
+	class TableOfContents extends HTMLElement {
+		tocEl: HTMLElement | null = null;
+		tocItems: TocItem[] = [];
+		headings: Array<HTMLElement | undefined> = [];
+		store = getPostTocStore();
+		activeTracker: TocActiveTracker = this.store.getSnapshot().tracker;
+		activeIndicator: HTMLElement | null = null;
+		viewportState: DesktopTocViewState | null = null;
+		presenter: DesktopTocPresenter | null = null;
+		presenterVersion = -1;
+		contentResizeObserver: ResizeObserver | null = null;
+		removeStoreSubscriber: (() => void) | null = null;
+		initialized = false;
+
+		update = (reason?: DesktopTocTransitionType) => {
+			const snapshot = this.store.update("scroll");
+			if (reason) this.applyStoreSnapshot(snapshot, reason);
+		};
+
+		handleLayoutResize = () => {
+			this.store.measure("layout-remeasure");
+		};
+
+		resolveRootsOnlyReason(
+			currentIndex: number,
+		): DesktopTocRootsOnlyReason | null {
+			if (!this.activeTracker.nodes.length) return "empty";
+			if (!this.canUseRootsOnlyBoundary()) return null;
+			const boundaryState = this.activeTracker.getBoundaryState();
+			if (boundaryState === "before" || currentIndex < 0) return "top";
+			if (boundaryState === "after") return "bottom";
+
+			return null;
+		}
+
+		getReadingContentRoot() {
+			return (
+				document.querySelector(
+					"#post-container .post-detail__content",
+				) as HTMLElement | null
+			) ?? (document.querySelector("#post-container") as HTMLElement | null);
+		}
+
+		getTocDataElement() {
+			return this.querySelector(
+				"script[data-toc-items]",
+			) as HTMLScriptElement | null;
+		}
+
+		getTocBody() {
+			return (
+				this.closest(".post-support__toc-body") as HTMLElement | null
+			);
+		}
+
+		canUseRootsOnlyBoundary() {
+			const root = this.getReadingContentRoot();
+			const contentHeight =
+				root?.getBoundingClientRect().height ??
+				document.documentElement.scrollHeight;
+			return (
+				this.tocItems.length >= TOC_BOUNDARY_MIN_ITEMS &&
+				this.activeTracker.graph.rootIndexes.length >=
+					TOC_BOUNDARY_MIN_ROOTS &&
+				contentHeight >= window.innerHeight * TOC_BOUNDARY_MIN_VIEWPORTS
+			);
+		}
+
+		toDesktopReason(reason: TocStoreReason): DesktopTocTransitionType | undefined {
+			if (reason === "init") return "init";
+			if (reason === "runtime-refresh") return "runtime-refresh";
+			if (reason === "layout-remeasure" || reason === "scroll-settle") {
+				return "layout-remeasure";
+			}
+			return undefined;
+		}
+
+		applyStoreSnapshot(
+			snapshot: TocStoreSnapshot,
+			forcedReason?: DesktopTocTransitionType,
+			storeReason: TocStoreReason = "scroll",
+		) {
+			if (snapshot.items.length === 0) return;
+			this.tocItems = snapshot.items;
+			this.headings = snapshot.headings;
+			this.activeTracker = snapshot.tracker;
+			if (!this.presenter || this.presenterVersion !== snapshot.version) {
+				this.presenter?.dispose();
+				this.presenter = new DesktopTocPresenter({
+					host: this,
+					scrollRoot: this.tocEl ?? this,
+					indicator: this.activeIndicator,
+					graph: snapshot.graph,
+				});
+				this.presenterVersion = snapshot.version;
+			}
+			requestAnimationFrame(() => {
+				const nextState = this.resolveViewportState(
+					snapshot.activeIndex,
+					forcedReason ?? this.toDesktopReason(storeReason),
+				);
+				this.viewportState = nextState;
+				this.presenter?.apply(nextState);
+			});
+		}
+
+		resolveViewportState(
+			currentIndex: number,
+			reason?: DesktopTocTransitionType,
+			options: { suppressHighlight?: boolean } = {},
+		) {
+			const rootsOnlyReason = this.resolveRootsOnlyReason(currentIndex);
+			return resolveDesktopTocViewState({
+				graph: this.activeTracker.graph,
+				activeIndex: currentIndex,
+				previous: this.viewportState,
+				scrollDirection: this.activeTracker.scrollDirection,
+				rootsOnly: rootsOnlyReason !== null,
+				rootsOnlyReason,
+				suppressHighlight: options.suppressHighlight,
+				reason,
+			});
+		}
+
+		readTocItems() {
+			const dataElement = this.getTocDataElement();
+			if (!dataElement?.textContent) return [];
+			try {
+				return JSON.parse(dataElement.textContent) as TocItem[];
+			} catch {
+				return [];
+			}
+		}
+
+		handleAnchorClick = (event: Event) => {
+			const anchor = event
+				.composedPath()
+				.find((element) => element instanceof HTMLAnchorElement);
+
+			if (anchor) {
+				event.preventDefault(); // 阻止默认的锚点跳转
+				event.stopPropagation();
+
+				const id = decodeURIComponent(anchor.hash?.substring(1));
+				scrollToHeading(id);
+			}
+		};
+
+		getContentRoot() {
+			return getPostContentRoot();
+		}
+
+		resetRuntimeState() {
+			if (this.initialized) {
+				this.tocEl?.removeEventListener(
+					"click",
+					this.handleAnchorClick,
+				);
+				this.contentResizeObserver?.disconnect();
+				this.removeStoreSubscriber?.();
+				this.presenter?.dispose();
+			}
+			this.tocItems = [];
+			this.headings = [];
+			this.activeTracker = this.store.getSnapshot().tracker;
+			this.viewportState = null;
+			this.presenter = null;
+			this.presenterVersion = -1;
+			this.contentResizeObserver = null;
+			this.removeStoreSubscriber = null;
+			this.initialized = false;
+		}
+
+		connectedCallback() {
+			// 优先监听动画结束，兜底定时初始化，确保二次刷新也能正常显示 TOC
+			const element =
+				document.querySelector(".custom-md") ||
+				document.querySelector(".prose") ||
+				document.querySelector(".markdown-content");
+			let initialized = false;
+			const tryInit = () => {
+				if (!initialized) {
+					initialized = true;
+					this.init();
+				}
+			};
+			if (element) {
+				element.addEventListener("animationend", tryInit, {
+					once: true,
+				});
+				tryInit();
+				// 兜底：无论动画是否触发，300ms后强制初始化一次
+				setTimeout(tryInit, 300);
+			} else {
+				// 没有动画元素，直接初始化，兜底再延迟一次
+				tryInit();
+				setTimeout(tryInit, 300);
+			}
+		}
+
+		init() {
+			this.resetRuntimeState();
+
+			this.tocEl = this.getTocBody() ?? this;
+
+			this.tocEl.addEventListener("click", this.handleAnchorClick, {
+				capture: true,
+			});
+
+			this.activeIndicator = this.querySelector(
+				"#active-indicator",
+			) as HTMLElement | null;
+
+			this.tocItems = this.readTocItems();
+
+			this.initialized = true;
+			if (this.tocItems.length === 0) return;
+
+			const contentRoot = this.getContentRoot();
+			this.store.setItems(this.tocItems, contentRoot, "init");
+			this.removeStoreSubscriber = this.store.subscribe(
+				(snapshot, reason) =>
+					this.applyStoreSnapshot(snapshot, undefined, reason),
+			);
+
+			if (contentRoot && "ResizeObserver" in window) {
+				this.contentResizeObserver = new ResizeObserver(
+					this.handleLayoutResize,
+				);
+				this.contentResizeObserver.observe(contentRoot);
+			}
+
+		}
+
+		refreshRuntimeHeadings(root?: Element) {
+			this.regenerateTOC(0, root);
+			this.init();
+		}
+
+		regenerateTOC(retryCount = 0, root?: Element) {
+			// 检查是否为文章页面
+			const isPostPage =
+				window.location.pathname.includes("/posts/") ||
+				document.querySelector(".custom-md, .markdown-content") !==
+					null;
+			if (!isPostPage) {
+				// 如果不是文章页面，隐藏TOC
+				this.innerHTML = "";
+				delete this.dataset.loaded;
+				return;
+			}
+			// 从当前页面重新获取标题
+			const contentRoot = root || this.getContentRoot();
+			if (!contentRoot) {
+				this.innerHTML = "";
+				delete this.dataset.loaded;
+				return;
+			}
+			const headings = collectTocHeadings(contentRoot);
+			// 如果没有标题，延迟重试最多3次
+			if (headings.length === 0 && retryCount < 3) {
+				setTimeout(
+					() => this.regenerateTOC(retryCount + 1, root),
+					120,
+				);
+				return;
+			}
+			if (headings.length === 0) {
+				this.innerHTML = "";
+				delete this.dataset.loaded;
+				return;
+			}
+			const tocItems = buildTocItems(headings, getTocOptions());
+			const tocItemsJson = JSON.stringify(tocItems).replaceAll(
+				"<",
+				"\\u003c",
+			);
+			const tocHTML = renderDesktopTocShell(tocItems);
+			this.innerHTML =
+				'<scr' +
+				`ipt type="application/json" data-toc-items>${tocItemsJson}</scr` +
+				"ipt>" +
+				tocHTML +
+				'<div id="active-indicator" style="opacity: 0" class="-z-10 absolute bg-(--toc-btn-hover) left-0 right-0 rounded-xl toc-active-indicator group-hover:bg-transparent border-2 border-(--toc-btn-hover) group-hover:border-(--toc-btn-active) border-dashed"></div>';
+			this.dataset.loaded = "true";
+		}
+
+		disconnectedCallback() {
+			this.tocEl?.removeEventListener("click", this.handleAnchorClick);
+			this.contentResizeObserver?.disconnect();
+			this.removeStoreSubscriber?.();
+			this.presenter?.dispose();
+		}
+	}
+
+	if (!customElements.get("table-of-contents")) {
+		customElements.define("table-of-contents", TableOfContents);
+	}
+
+	onPostTocRefresh(({ root }) => {
+		const toc = document.querySelector(
+			"table-of-contents",
+		) as TableOfContents | null;
+		toc?.refreshRuntimeHeadings(root);
+	});
+</script>
+
+<style>
+	table-of-contents#toc {
+		--toc-entry-badge-size: var(--text-caption-size);
+		--toc-entry-label-size: var(--text-meta-size);
+		max-height: none;
+		min-height: 0;
+		overflow: visible;
+		position: relative;
+		display: block;
+	}
+
+	table-of-contents#toc :global(a) {
+		max-height: 5rem;
+		overflow: hidden;
+		transition:
+			max-height var(--motion-normal) var(--motion-ease-standard),
+			min-height var(--motion-normal) var(--motion-ease-standard),
+			padding var(--motion-normal) var(--motion-ease-standard),
+			opacity var(--motion-normal) var(--motion-ease-standard),
+			color var(--motion-fast) var(--motion-ease-standard),
+			background-color var(--motion-fast) var(--motion-ease-standard);
+	}
+
+	table-of-contents#toc :global(.toc-entry-badge) {
+		margin-left: calc(var(--toc-level, 0) * 1rem);
+		font-size: var(--toc-entry-badge-size);
+	}
+
+	table-of-contents#toc :global(.toc-entry-label) {
+		min-width: 0;
+		overflow: hidden;
+		font-size: var(--toc-entry-label-size);
+		line-height: 1.35;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	table-of-contents#toc :global(a:focus-visible) {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	table-of-contents#toc :global(a.is-read) {
+		opacity: 0.52;
+	}
+
+	table-of-contents#toc :global(a.is-current-branch) {
+		color: var(--text-primary);
+	}
+
+	table-of-contents#toc :global(.toc-expanded-region) {
+		height: 0;
+		overflow: hidden;
+		opacity: 0;
+		transform: translateY(-4px);
+		will-change: height, opacity, transform;
+		transition:
+			height var(--motion-normal) var(--motion-ease-standard),
+			opacity var(--motion-fast) var(--motion-ease-standard),
+			transform var(--motion-normal) var(--motion-ease-standard);
+	}
+
+	table-of-contents#toc :global(.toc-expanded-region[data-expanded="true"]) {
+		opacity: 1;
+		transform: translateY(0);
+	}
+
+	table-of-contents#toc :global(.toc-active-indicator) {
+		top: 0;
+		bottom: auto;
+		transform: translateY(0);
+		will-change: transform, height, opacity;
+		transition:
+			transform var(--motion-normal) var(--motion-ease-standard),
+			height var(--motion-normal) var(--motion-ease-standard),
+			opacity var(--motion-fast) var(--motion-ease-standard),
+			background-color var(--motion-fast) var(--motion-ease-standard),
+			border-color var(--motion-fast) var(--motion-ease-standard);
+	}
+
+	table-of-contents#toc[data-toc-highlight-mode="fade-in"]
+		:global(.toc-active-indicator),
+	table-of-contents#toc[data-toc-highlight-mode="fade-in-place"]
+		:global(.toc-active-indicator) {
+		transition:
+			opacity var(--motion-fast) var(--motion-ease-standard),
+			background-color var(--motion-fast) var(--motion-ease-standard),
+			border-color var(--motion-fast) var(--motion-ease-standard);
+	}
+
+	table-of-contents#toc :global(a.is-collapsed) {
+		max-height: 0;
+		min-height: 0;
+		padding-top: 0;
+		padding-bottom: 0;
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		table-of-contents#toc :global(.toc-expanded-region) {
+			transition: none;
+		}
+	}
+
+</style>

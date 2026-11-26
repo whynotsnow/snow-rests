@@ -1,0 +1,120 @@
+---
+import { Font } from "astro:assets";
+import ConfigCarrier from "@components/ConfigCarrier.astro";
+import Live2DCompanion from "@/components/modules/live2d-companion/Live2DCompanion.svelte";
+import LayoutBannerStyles from "./page-shell/LayoutBannerStyles.astro";
+import LayoutHead from "./page-shell/LayoutHead.astro";
+import {
+	LAYOUT_BANNER_HEIGHT_HOME,
+	buildLayoutPageShellModel,
+} from "@/services/layout/page-shell";
+import "../styles/main.css";
+import "../styles/variables.css";
+import "../styles/navbar.css";
+import "../styles/fancybox-custom.css";
+import "../styles/panel-animations.css";
+import type { NavbarBehavior } from "@/services/layout/types";
+
+interface Props {
+	title?: string;
+	banner?: string;
+	description?: string;
+	lang?: string;
+	setOGTypeArticle?: boolean;
+	postSlug?: string;
+	canonicalUrl?: string;
+	navbarBehavior?: NavbarBehavior;
+}
+
+const {
+	title,
+	description,
+	setOGTypeArticle,
+	postSlug,
+	canonicalUrl,
+	navbarBehavior = "fixed-visible",
+} = Astro.props;
+const { banner, lang } = Astro.props;
+const pageShell = buildLayoutPageShellModel({
+	title,
+	description,
+	banner,
+	lang,
+	postSlug,
+	canonicalUrl,
+	pathname: Astro.url.pathname,
+	site: Astro.site,
+});
+---
+
+<!doctype html>
+<html
+	lang={pageShell.siteLang}
+	class="bg-(--page-bg)"
+>
+	<head>
+		<Font cssVariable="--font-latin" preload />
+		<Font cssVariable="--font-cjk" />
+		<LayoutHead
+			configHue={pageShell.configHue}
+			bannerHeightHome={`${LAYOUT_BANNER_HEIGHT_HOME}vh`}
+			bannerOffset={pageShell.bannerOffset}
+				canonicalUrl={pageShell.canonicalUrl}
+			description={pageShell.description}
+			favicons={pageShell.favicons}
+			generator={Astro.generator}
+			ogImageUrl={pageShell.ogImageUrl}
+			pageTitle={pageShell.pageTitle}
+				setOGTypeArticle={setOGTypeArticle}
+		>
+			<slot name="head" />
+		</LayoutHead>
+	</head>
+	<body
+		class="min-h-screen"
+		class:list={[
+			{
+				"is-home": pageShell.isHomePage,
+				"home-initial-enter": pageShell.isHomePage,
+				"is-post": Boolean(postSlug),
+				"enable-banner": pageShell.enableBanner,
+				"navbar-fixed-visible": navbarBehavior === "fixed-visible",
+			},
+		]}
+	>
+		<noscript
+			><iframe
+				src="https://www.googletagmanager.com/ns.html?id=GTM-KRX3XGVH"
+				height="0"
+				width="0"
+				style="display:none;visibility:hidden"></iframe></noscript
+		>
+		<!-- 页面顶部渐变高光效果 - 只在full和semifull模式下显示 -->
+		{pageShell.shouldShowTopHighlight && <div class="top-gradient-highlight" />}
+
+		<ConfigCarrier />
+		<slot />
+
+		<!-- Live2D Companion controller stays available; config only supplies its default mount state. -->
+		<Live2DCompanion client:idle />
+
+		<!-- Dynamic route-height compensation; the Shell runtime owns its exact size. -->
+		<div id="page-height-guard" class="page-height-guard" data-state="idle" aria-hidden="true"></div>
+	</body>
+</html>
+
+<LayoutBannerStyles />
+
+<script>
+	import "../scripts/layout-client";
+</script>
+
+<!-- 代码块折叠功能 -->
+<script>
+	import "../scripts/code-collapse";
+</script>
+
+<!-- 主题切换综合性能优化器（包含代码块优化、重型元素优化、性能诊断） -->
+<script>
+	import "../scripts/theme-optimizer";
+</script>

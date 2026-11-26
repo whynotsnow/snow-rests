@@ -1,0 +1,124 @@
+---
+import { Icon } from "astro-icon/components";
+import { siteConfig } from "@/config";
+import I18nKey from "@/i18n/i18nKey";
+import { i18n } from "@/i18n/translation";
+import ImageWrapper from "../misc/ImageWrapper.astro";
+import PostCardMeta from "./PostCardMeta.astro";
+import type { PostCardViewModel } from "@/services/core/types";
+
+interface Props {
+	class?: string;
+	entry: PostCardViewModel;
+	style?: string;
+	variant?: "adaptive" | "list" | "grid";
+}
+
+const { entry, style, variant = "adaptive" } = Astro.props;
+const className = Astro.props.class;
+
+const {
+	title,
+	url,
+	tags,
+	image,
+	description,
+	pinned,
+} = entry;
+
+const hasCover = entry.hasCoverImage && image?.src;
+const coverWidth = "28%";
+const useNewTagStyle = Boolean(siteConfig.tagStyle?.useNewStyle);
+---
+
+<div
+	class:list={[
+		"post-card post-item post-list-card ds-surface-card",
+		className,
+	]}
+	style={style}
+	data-tags={tags.map((t) => t.name).join(",")}
+	data-card-variant={variant}
+	data-has-cover={Boolean(hasCover)}
+	data-has-description={Boolean(description)}
+	data-tag-style={useNewTagStyle ? "new" : "legacy"}
+	data-pinned={pinned}
+>
+	<div class="post-list-card__content">
+		<a
+			href={url}
+			class="post-list-card__title transition"
+			title={title}
+		>
+			{title}
+			<Icon
+				class="post-list-card__title-chevron post-list-card__title-chevron--mobile"
+				name="material-symbols:chevron-right-rounded"
+			/>
+			<Icon
+				class="post-list-card__title-chevron post-list-card__title-chevron--desktop transition"
+				name="material-symbols:chevron-right-rounded"
+			/>
+		</a>
+
+		<PostCardMeta post={entry} />
+
+		<div
+			class="post-list-card__summary transition text-75"
+			title={description || entry.meta.excerpt}
+		>
+			{description || entry.meta.excerpt}
+		</div>
+
+		<div class="post-list-card__tags">
+			{
+				tags && tags.length > 0 ? (
+					tags.slice(0, 6).map((tag) => (
+						<a
+							href={tag.url}
+							class:list={[
+								"post-list-card__tag transition",
+								useNewTagStyle ? "link-lg" : "btn-regular",
+							]}
+							aria-label={`View all posts tagged with ${tag.name}`}
+							title={tag.name}
+						>
+							<span class="post-list-card__tag-label transition-transform">
+							# {tag.name}
+							</span>
+						</a>
+					))
+				) : (
+					<span class="post-list-card__tag-empty">{i18n(I18nKey.noTags)}</span>
+				)
+			}
+		</div>
+	</div>
+
+	<a
+		href={url}
+		aria-label={title}
+		class="post-list-card__cover"
+	>
+		{pinned && <span class="post-list-card__pinned-badge">{i18n(I18nKey.pinned)}</span>}
+		<div class="post-list-card__cover-overlay transition" />
+		<div class="post-list-card__cover-enter">
+			<Icon name="material-symbols:chevron-right-rounded" class="post-list-card__cover-enter-icon transition" />
+		</div>
+		{
+			hasCover ? (
+				<ImageWrapper
+					src={image}
+					alt={title}
+					class="post-list-card__image"
+				/>
+			) : (
+				<div class="post-list-card__cover-placeholder" aria-hidden="true">
+					<Icon name="material-symbols:article-outline-rounded" class="post-list-card__cover-placeholder-icon" />
+				</div>
+			)
+		}
+	</a>
+</div>
+
+<style define:vars={{ coverWidth }}></style>

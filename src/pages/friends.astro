@@ -1,0 +1,196 @@
+---
+import { getEntry, render } from "astro:content";
+import FriendCard from "@components/friends/FriendCard.astro";
+import Markdown from "@components/misc/Markdown.astro";
+import PageHeader from "@components/page/PageHeader.astro";
+import { siteConfig } from "../config";
+import { getShuffledFriendsList } from "../data/friends";
+import I18nKey from "../i18n/i18nKey";
+import { i18n } from "../i18n/translation";
+import MainGridLayout from "../layouts/MainGridLayout.astro";
+
+// 检查友链页面是否启用
+if (!siteConfig.featurePages.friends) {
+	return Astro.redirect("/404/");
+}
+
+const friendsPost = await getEntry("spec", "friends");
+
+if (!friendsPost) {
+	throw new Error("friends page content not found");
+}
+
+const { Content } = await render(friendsPost);
+const friendsList = getShuffledFriendsList();
+
+// 获取所有标签
+const allTags = Array.from(new Set(friendsList.flatMap((item) => item.tags)));
+const title = i18n(I18nKey.friends);
+const subtitle = i18n(I18nKey.friendsSubtitle);
+---
+
+<MainGridLayout title={title} description={title} layoutPolicy="content">
+	<!-- 只在友情链接页面加载脚本 -->
+	<script is:inline>
+		// 标记当前页面为友情链接页面
+		window.isFriendsPage = true;
+	</script>
+
+	<div
+		class="flex w-full rounded-(--radius-large) overflow-hidden relative min-h-32"
+	>
+		<div class="card-base z-10 px-9 py-6 relative w-full">
+			<PageHeader {title} {subtitle} />
+
+			<!-- 搜索和筛选栏 -->
+			<div class="mb-6 space-y-3">
+				<!-- 搜索框 -->
+				<div class="w-full">
+					<div class="relative">
+						<input
+							type="text"
+							id="friend-search"
+							placeholder={i18n(I18nKey.friendsSearchPlaceholder)}
+							class="friend-search__input w-full px-4 py-2 pl-10 rounded-lg bg-(--btn-regular-bg)
+								border border-(--border-subtle)
+								focus:outline-none focus:ring-2 focus:ring-(--accent)/50
+								transition-all duration-200"
+						/>
+						<svg
+							class="friend-search__icon absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+							aria-hidden="true"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"
+							></path>
+						</svg>
+					</div>
+				</div>
+
+				<!-- 标签筛选 -->
+				<div class="filter-container flex flex-wrap gap-2">
+					<button class="filter-tag active" data-tag="all">
+						{i18n(I18nKey.friendsFilterAll)}
+					</button>
+					{
+						allTags.map((tag) => (
+							<button class="filter-tag" data-tag={tag}>
+								{tag}
+							</button>
+						))
+					}
+				</div>
+			</div>
+
+			<!-- 友链卡片网格 -->
+			<div
+				id="friends-grid"
+				class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6 mb-6"
+			>
+				{friendsList.map((item) => <FriendCard friend={item} />)}
+			</div>
+
+			<!-- 无结果提示 -->
+			<div id="no-results" class="hidden text-center py-12">
+				<svg
+					class="friends-empty__icon w-16 h-16 mx-auto mb-4"
+					fill="none"
+					stroke="currentColor"
+					viewBox="0 0 24 24"
+					aria-hidden="true"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M9.172 16.172a4 4 0 0 1 5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
+					></path>
+				</svg>
+				<p class="friends-empty__message">
+					{i18n(I18nKey.friendsNoResults)}
+				</p>
+			</div>
+
+			<!-- 说明文档 -->
+			<Markdown class="mt-8">
+				<Content />
+			</Markdown>
+
+			<!-- 隐藏元素用于传递 i18n 文本到全局脚本 -->
+			<div id="friends-copy-success-text" style="display: none;">
+				{i18n(I18nKey.friendsCopySuccess)}
+			</div>
+		</div>
+	</div>
+
+	<!-- 引用全局脚本 -->
+	<script is:inline src="/js/friends-page-handler.js"></script>
+</MainGridLayout>
+
+<style>
+	#friend-search:focus {
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+	}
+
+	.friend-search__input {
+		color: var(--text-primary);
+		font-size: var(--text-ui-size);
+	}
+
+	.friend-search__icon {
+		color: var(--text-muted);
+	}
+
+	.filter-container {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.filter-tag {
+		padding: 0.5rem 1rem;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-large);
+		background: var(--btn-regular-bg);
+		color: var(--btn-content);
+		font-size: var(--text-ui-size);
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		white-space: nowrap;
+	}
+
+	.filter-tag:hover:not(.active) {
+		background: var(--btn-regular-bg-hover);
+		border-color: var(--accent);
+		transform: translateY(-1px);
+	}
+
+	.filter-tag.active {
+		background: var(--accent);
+		color: var(--text-on-accent);
+		border-color: var(--accent);
+	}
+
+	.filter-tag.active:hover {
+		background: var(--accent) !important;
+		color: var(--text-on-accent) !important;
+		border-color: var(--accent) !important;
+		transform: translateY(-1px);
+	}
+
+	.friends-empty__icon {
+		color: color-mix(in srgb, var(--text-primary) 20%, transparent);
+	}
+
+	.friends-empty__message {
+		color: var(--text-muted);
+		font-size: var(--text-section-title-size);
+	}
+</style>
