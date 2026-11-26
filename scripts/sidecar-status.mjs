@@ -1,136 +1,68 @@
-import fs from "node:fs";
-import path from "node:path";
-import process from "node:process";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const projectRoot = process.cwd();
-const sidecarPath = "../blog.sidecar";
-const jsonMode = process.argv.includes("--json");
-const schemaVersion = 3;
-const phases = {
-	demand: ["discussing", "decided", "deferred"],
-	execution: ["ready", "running", "blocked", "done"],
-	archive: ["archived"],
-};
-
-function fail(code, message, details = []) {
-	const payload = {
-		ok: false,
-		schemaVersion,
-		projectName: "blog",
-		projectKey: "BLOG",
-		sidecarPath,
-		error: { code, message, details },
-	};
-	process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-	process.exitCode = 1;
-}
-function readJson(file, label) {
-	if (!fs.existsSync(file)) {
-		fail("SIDECAR_NOT_FOUND", `${label} is unavailable.`, [
-			{ path: sidecarPath, reason: "missing" },
-		]);
-		return null;
-	}
-	try {
-		return JSON.parse(fs.readFileSync(file, "utf8"));
-	} catch (error) {
-		fail("SIDECAR_CONFIG_OR_INDEX_INVALID", `${label} is not valid JSON.`, [
-			{ path: path.basename(file), reason: error.message },
-		]);
-		return null;
-	}
+const scriptDirectory = fileURLToPath(new URL(".", import.meta.url));
+function git(...args) {
+	const result = spawnSync("git", args, {
+		cwd: scriptDirectory,
+		encoding: "utf8",
+	});
+	return result.status === 0 ? result.stdout.trim() : null;
 }
 
-const root = path.resolve(projectRoot, sidecarPath);
-const config = readJson(
-	path.join(root, "sidecar.config.json"),
-	"Blog sidecar config",
+const projectRoot = git("rev-parse", "--show-toplevel") || process.cwd();
+const commonDirectory = git(
+	"rev-parse",
+	"--path-format=absolute",
+	"--git-common-dir",
 );
-const index = readJson(path.join(root, "index.json"), "Blog sidecar index");
-if (!config || !index) process.exit(1);
-if (
-	config.schemaVersion !== schemaVersion ||
-	index.schemaVersion !== schemaVersion
-) {
-	fail("SIDECAR_SCHEMA_UNSUPPORTED", "Sidecar must use schemaVersion 3.");
-	process.exit(1);
-}
-if (!Array.isArray(index.rms) || !Array.isArray(index.tasks)) {
-	fail(
-		"SIDECAR_INDEX_INVALID",
-		"index.json must contain rms and tasks arrays.",
-	);
-	process.exit(1);
-}
-const counts = Object.fromEntries(
-	Object.entries(phases).map(([phase, statuses]) => [
-		phase,
-		Object.fromEntries(statuses.map((status) => [status, 0])),
-	]),
+const primaryRoot =
+	commonDirectory && basename(commonDirectory) === ".git"
+		? dirname(commonDirectory)
+		: projectRoot;
+const name = basename(primaryRoot);
+const envKey = name.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_SIDECAR_PATH";
+const override =
+	process.env.SIDECAR_PATH?.trim() || process.env[envKey]?.trim();
+const defaults = [
+	resolve(projectRoot, "..", name + ".sidecar"),
+	resolve(primaryRoot, "..", name + ".sidecar"),
+];
+const roots = override ? [resolve(projectRoot, override)] : defaults;
+const root = roots.find((candidate) =>
+	existsSync(resolve(candidate, "sidecar.config.json")),
 );
-function summarize(item, type) {
-	if (
-		!item ||
-		typeof item.id !== "string" ||
-		!phases[item.phase]?.includes(item.status)
-	) {
-		fail(
-			"SIDECAR_STATUS_INVALID",
-			"index.json contains an invalid RM/task lifecycle.",
-			[{ itemId: item?.id ?? null }],
+const args = process.argv.slice(2);
+
+function fail(message) {
+	if (args.includes("--json")) {
+		console.log(
+			JSON.stringify({
+				ok: false,
+				schemaVersion: 3,
+				executable: [],
+				blocked: [],
+				diagnostics: { errors: [message] },
+			}),
 		);
-		process.exit(1);
+	} else {
+		console.error(message);
 	}
-	counts[item.phase][item.status] += 1;
-	return {
-		...item,
-		type,
-		itemPath:
-			item.itemPath ?? `${type === "rm" ? "rms" : "tasks"}/${item.id}.md`,
-	};
+	process.exit(1);
 }
-const rms = index.rms.map((item) => summarize(item, "rm"));
-const tasks = index.tasks.map((item) => summarize(item, "task"));
-const items = [...rms, ...tasks].sort(
-	(left, right) =>
-		String(right.updatedAt ?? "").localeCompare(
-			String(left.updatedAt ?? ""),
-		) || left.id.localeCompare(right.id),
+
+if (!root) fail("Sidecar directory was not found.");
+const runtime = [root, ...defaults]
+	.map((directory) => resolve(directory, "tools/sidecar/status_sidecar.py"))
+	.find((candidate) => existsSync(candidate));
+if (!runtime)
+	fail("Install the Sidecar v3.1 tooling in the active adjacent repository.");
+const child = spawnSync(
+	process.env.SIDECAR_PYTHON || "python3",
+	["-B", runtime, root, ...args],
+	{ stdio: "inherit" },
 );
-const payload = {
-	ok: true,
-	schemaVersion,
-	projectName: config.projectName,
-	projectKey: config.projectKey,
-	sidecarPath,
-	source: {
-		indexPath: `${sidecarPath}/index.json`,
-		updatedAt: index.updatedAt,
-	},
-	counts,
-	rms,
-	tasks,
-	boards: { rm: { items: rms }, task: { items: tasks } },
-	items,
-	executable: tasks
-		.filter(
-			(item) =>
-				item.phase === "execution" &&
-				["ready", "running"].includes(item.status),
-		)
-		.map((item) => item.id)
-		.sort(),
-	blocked: tasks
-		.filter(
-			(item) => item.phase === "execution" && item.status === "blocked",
-		)
-		.map((item) => item.id)
-		.sort(),
-};
-if (jsonMode) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
-else {
-	console.log(`${payload.projectName} sidecar v3 status`);
-	console.log(`sidecar root: ${payload.sidecarPath}`);
-	console.log(`RM: ${rms.length}; task: ${tasks.length}`);
-	console.log(`executable tasks: ${payload.executable.join(", ") || "none"}`);
-}
+if (child.error) fail("Could not start Python for the Sidecar status command.");
+process.exitCode = child.status ?? 1;
