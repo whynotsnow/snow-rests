@@ -8,6 +8,12 @@ const workflow = fs.readFileSync(
 	path.resolve(import.meta.dirname, "../../../.github/workflows/CI.yml"),
 	"utf8",
 );
+const impactMap = JSON.parse(
+	fs.readFileSync(
+		path.resolve(import.meta.dirname, "../../impact-map.json"),
+		"utf8",
+	),
+);
 const candidateEnvironmentValidator = fs.readFileSync(
 	path.resolve(
 		import.meta.dirname,
@@ -174,6 +180,20 @@ describe("CI impact group coverage", () => {
 		expect(browserTests).toContain(
 			"tests/e2e/features/albums-diary.spec.ts",
 		);
+		expect(
+			impactMap.rules.find((rule) =>
+				rule.patterns.includes(
+					"tests/e2e/features/post-detail.spec.ts",
+				),
+			).groups,
+		).toContain("post-support-toc");
+		expect(
+			impactMap.rules.find((rule) =>
+				rule.patterns.includes(
+					"tests/e2e/features/floating-tools.spec.ts",
+				),
+			).groups,
+		).toContain("floating-toc");
 	});
 });
 

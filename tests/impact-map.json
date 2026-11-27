@@ -524,7 +524,7 @@
 		},
 		{
 			"patterns": ["tests/e2e/features/post-detail.spec.ts"],
-			"groups": ["test-type", "post-detail"]
+			"groups": ["test-type", "post-detail", "post-support-toc"]
 		},
 		{
 			"patterns": ["tests/e2e/features/site-notice.spec.ts"],
@@ -536,7 +536,7 @@
 		},
 		{
 			"patterns": ["tests/e2e/features/floating-tools.spec.ts"],
-			"groups": ["test-type", "floating-tools"]
+			"groups": ["test-type", "floating-tools", "floating-toc"]
 		},
 		{
 			"patterns": ["tests/e2e/features/albums-diary.spec.ts"],

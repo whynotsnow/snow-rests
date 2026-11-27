@@ -39,9 +39,27 @@ describe("impact-based validation selection", () => {
 			"design",
 			"floating-tools",
 		]);
-		expect(testPlan.groups).toEqual(["test-type", "floating-tools"]);
+		expect(testPlan.groups).toEqual([
+			"test-type",
+			"floating-tools",
+			"floating-toc",
+		]);
 		expect(sourcePlan.unmatched).toEqual([]);
 		expect(testPlan.unmatched).toEqual([]);
+	});
+
+	it("selects focused TOC regressions when their test files change", () => {
+		const postPlan = planFor("tests/e2e/features/post-detail.spec.ts");
+		const floatingPlan = planFor(
+			"tests/e2e/features/floating-tools.spec.ts",
+		);
+
+		expect(postPlan.groups).toContain("post-detail");
+		expect(postPlan.groups).toContain("post-support-toc");
+		expect(floatingPlan.groups).toContain("floating-tools");
+		expect(floatingPlan.groups).toContain("floating-toc");
+		expect(postPlan.unmatched).toEqual([]);
+		expect(floatingPlan.unmatched).toEqual([]);
 	});
 
 	it("keeps floating TOC changes on shell and post-detail checks", () => {
