@@ -107,7 +107,7 @@ pnpm lint
 pnpm lint:md
 ```
 
-先运行 `pnpm test:plan` 查看本地快速模式的改动影响范围；需要自动执行选择结果时运行 `pnpm test:affected`。本地模式不会自动执行 `verify:full`，无法分类或建议完整回归的路径会以风险提示输出。CI 或远程 Push 场景使用 `pnpm test:plan:ci` 与 `pnpm test:affected:ci`，此时高风险路径会升级到完整回归。`pnpm test:impact:check` 会确认 `src/components/modules/**` 与 `tests/e2e/**` 均已录入 Impact Map，避免新增模块在 CI 中静默回退到全量验证。`pnpm type-check` 检查纯 TypeScript 项目，`pnpm type-check:scripts` 使用 `tsconfig.scripts.json` 对 Node 脚本执行 `checkJs` 检查，`pnpm type-check:declarations` 使用 `--isolatedDeclarations` 检查导出声明边界，已接入 CI Quality Checks，但不会在本地 precommit 中阻塞提交。`pnpm type-check:svelte` 使用 `svelte-check` 检查 `.svelte` 组件脚本、模板和 Props 诊断，`pnpm type-check:tests` 检查 Unit、Integration、Playwright 和测试配置。`pnpm test:fast` 运行 Vitest 快速层。
+先运行 `pnpm test:plan` 查看本地快速模式的改动影响范围；需要自动执行选择结果时运行 `pnpm test:affected`。本地模式不会自动执行 `verify:full`，无法分类或建议完整回归的路径会以风险提示输出。CI 或远程 Push 场景使用 `pnpm test:plan:ci` 与 `pnpm test:affected:ci`，此时高风险路径会升级到完整回归。`pnpm test:impact:check` 会确认 `src/components/modules/**` 与 `tests/e2e/**` 均已录入 Impact Map，避免新增模块在 CI 中静默回退到全量验证。`pnpm type-check` 检查纯 TypeScript 项目；`pnpm type-check:scripts` 使用 `tsconfig.scripts.json` 对 Node 脚本执行 `checkJs` 检查；`pnpm type-check:declarations` 使用 `--isolatedDeclarations` 检查导出声明边界；`pnpm type-check:svelte` 使用 `svelte-check` 检查 `.svelte` 组件脚本、模板和 Props 诊断；`pnpm type-check:tests` 检查 Unit、Integration、Playwright 和测试配置。这些检查都由 CI Quality Checks 的 full 或对应 impact group 选择运行，但不会在本地 precommit 中阻塞提交。`pnpm test:fast` 运行 Vitest 快速层。
 
 `pnpm sidecar` 会启动相邻 `../snow-rests.sidecar` sidecar 的本地预览面板，并打开 RM/task 首页；也可以通过 `pnpm sidecar -- SR-RM-0001` 或 `pnpm sidecar -- SR-TASK-0001` 直接打开指定对象页面。自动化或仅检查 URL 时使用 `pnpm sidecar -- --print`，只启动不打开浏览器时使用 `pnpm sidecar -- --no-open`。`pnpm sidecar:status` 读取 v3 sidecar，分别输出 RM、task 和可执行 task 状态。Sidecar 用于保存需求、任务、Agent plan、决策、执行记录、验证摘要和 handoff；产品源码、部署文件、运行配置和正式项目文档仍属于当前仓库。可用 `SNOW_RESTS_SIDECAR_PATH` 覆盖默认路径；旧变量 `BLOG_SIDECAR_PATH` 不再参与解析，历史追溯使用 sidecar 中指向原件的链接。
 
@@ -154,7 +154,7 @@ Markdown 规范检查由 `markdownlint-cli2` 单独处理，不会自动重写�
 5. Design、Astro/内容、source TypeScript 和 Svelte component 门禁仅在对应范围变化时运行；Astro 检查会把 `hint` 级诊断也作为提交阻塞项，Svelte component 门禁使用 `svelte-check --tsconfig ./tsconfig.json --threshold error` 对齐 VSCode Svelte Language Server 的 error 级组件诊断。
 6. 测试和测试配置变化时运行独立的 `tsconfig.tests.json` 检查；`tests/tsconfig.json` 只服务编辑器项目发现，继承同一套测试类型配置。
 
-GitHub Pull Request 与普通 `main` Push CI 都使用 `tests/impact-map.json` 的 CI 模式，按 Git Diff 选择 Quality、Fast Tests、Browser Tests 和 Astro Build。依赖、测试基础设施、跨模块基础设施、未分类路径等高风险改动在 CI 中仍会升级为全量验证；每周定时任务和手动 Workflow Dispatch 固定运行全部门禁，作为影响映射的兜底。
+GitHub Pull Request 与普通 `main` Push CI 都使用 `tests/impact-map.json` 的 CI 模式，按 Git Diff 选择 Quality、Fast Tests、Browser Tests 和 Astro Build。CI jobs 必须消费 Impact Map 中的静态、脚本/Svelte/测试类型、Unit/Integration、各 Playwright 组和构建组；新增 group 时同步更新 workflow 和 workflow 契约测试。依赖、测试基础设施、跨模块基础设施、未分类路径等高风险改动在 CI 中仍会升级为全量验证；每周定时任务和手动 Workflow Dispatch 固定运行全部门禁，作为影响映射的兜底。
 
 也可以手动运行：
 

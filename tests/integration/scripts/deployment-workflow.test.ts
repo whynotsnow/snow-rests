@@ -78,7 +78,7 @@ describe("Candidate execution environment workflow contract", () => {
 			"node scripts/validate-candidate-environment.mjs --inputs-only",
 		);
 		expect(workflow).toContain(
-			"environment: ${{ inputs.execution_environment || 'production' }}",
+			"environment: ${{ inputs.execution_environment == 'preview' && 'Preview' || 'production' }}",
 		);
 		expect(workflow).toContain(
 			"needs.candidate-preflight.result == 'success'",
@@ -116,6 +116,64 @@ describe("Candidate execution environment workflow contract", () => {
 			"apiBaseUrl || PRODUCTION_API_ORIGIN",
 		);
 		expect(candidateEnvironmentValidator).toContain("PREVIEW_API_ORIGIN");
+	});
+});
+
+describe("CI impact group coverage", () => {
+	it("consumes every impact-map group in its owning validation job", () => {
+		const quality = jobSection("quality", "fast-tests");
+		const fastTests = jobSection("fast-tests", "browser-tests");
+		const browserTests = jobSection("browser-tests", "build");
+		const build = jobSection("build", "ci-summary");
+		const qualityGroups = [
+			"workspace",
+			"markdown",
+			"lint",
+			"type",
+			"script-type",
+			"svelte-type",
+			"test-type",
+			"astro",
+			"design",
+			"declaration-type",
+		];
+		const browserGroups = [
+			"smoke",
+			"shell",
+			"home",
+			"page-support",
+			"post-list",
+			"post-detail",
+			"post-support-toc",
+			"activity-center",
+			"floating-tools",
+			"floating-toc",
+			"albums-diary",
+			"design-contract",
+		];
+
+		for (const group of qualityGroups)
+			expect(quality).toContain(`'"${group}"'`);
+		expect(quality).toContain(`'"full"'`);
+		for (const group of ["unit", "integration"])
+			expect(fastTests).toContain(`'"${group}"'`);
+		expect(fastTests).toContain(`'"full"'`);
+		for (const group of browserGroups)
+			expect(browserTests).toContain(`'"${group}"'`);
+		expect(browserTests).toContain(`'"full"'`);
+		expect(build).toContain('"astro-build"');
+		expect(build).toContain('"full"');
+		expect(quality).toContain("run: pnpm type-check:scripts");
+		expect(quality).toContain("run: pnpm type-check:svelte");
+		expect(browserTests).toContain(
+			"tests/e2e/features/post-detail.spec.ts -g",
+		);
+		expect(browserTests).toContain(
+			"tests/e2e/features/floating-tools.spec.ts -g",
+		);
+		expect(browserTests).toContain(
+			"tests/e2e/features/albums-diary.spec.ts",
+		);
 	});
 });
 

@@ -144,6 +144,8 @@ jobs:
             contains(needs.plan.outputs.groups, '"markdown"') ||
             contains(needs.plan.outputs.groups, '"lint"') ||
             contains(needs.plan.outputs.groups, '"type"') ||
+            contains(needs.plan.outputs.groups, '"script-type"') ||
+            contains(needs.plan.outputs.groups, '"svelte-type"') ||
             contains(needs.plan.outputs.groups, '"declaration-type"') ||
             contains(needs.plan.outputs.groups, '"test-type"') ||
             contains(needs.plan.outputs.groups, '"astro"') ||
@@ -177,6 +179,12 @@ jobs:
             - name: Run source TypeScript Check
               if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"type"')
               run: pnpm type-check
+            - name: Run script TypeScript Check
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"script-type"')
+              run: pnpm type-check:scripts
+            - name: Run Svelte TypeScript Check
+              if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"svelte-type"')
+              run: pnpm type-check:svelte
             - name: Run declaration TypeScript Check
               if: contains(needs.plan.outputs.groups, '"full"') || contains(needs.plan.outputs.groups, '"declaration-type"')
               run: pnpm type-check:declarations
@@ -226,9 +234,12 @@ jobs:
             contains(needs.plan.outputs.groups, '"page-support"') ||
             contains(needs.plan.outputs.groups, '"post-list"') ||
             contains(needs.plan.outputs.groups, '"post-detail"') ||
+            contains(needs.plan.outputs.groups, '"post-support-toc"') ||
             contains(needs.plan.outputs.groups, '"site-notice"') ||
             contains(needs.plan.outputs.groups, '"activity-center"') ||
             contains(needs.plan.outputs.groups, '"floating-tools"') ||
+            contains(needs.plan.outputs.groups, '"floating-toc"') ||
+            contains(needs.plan.outputs.groups, '"albums-diary"') ||
             contains(needs.plan.outputs.groups, '"design-contract"')
         runs-on: ubuntu-latest
         steps:
@@ -263,6 +274,9 @@ jobs:
             - name: Run Post Detail suite
               if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"post-detail"') }}
               run: pnpm exec playwright test tests/e2e/features/post-detail.spec.ts
+            - name: Run Post Support TOC test
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"post-support-toc"') }}
+              run: pnpm exec playwright test tests/e2e/features/post-detail.spec.ts -g "post support TOC owns internal overflow without sidebar scrollbar"
             - name: Run Site Notice suite
               if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"site-notice"') }}
               run: pnpm exec playwright test tests/e2e/features/site-notice.spec.ts
@@ -272,6 +286,12 @@ jobs:
             - name: Run Floating Tools suite
               if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"floating-tools"') }}
               run: pnpm exec playwright test tests/e2e/features/floating-tools.spec.ts
+            - name: Run Floating TOC test
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"floating-toc"') }}
+              run: pnpm exec playwright test tests/e2e/features/floating-tools.spec.ts -g "floating TOC progress ring geometry"
+            - name: Run Albums and Diary suite
+              if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"albums-diary"') }}
+              run: pnpm exec playwright test tests/e2e/features/albums-diary.spec.ts
             - name: Run Design contract suite
               if: ${{ !contains(needs.plan.outputs.groups, '"full"') && contains(needs.plan.outputs.groups, '"design-contract"') }}
               run: pnpm exec playwright test tests/e2e/contracts/design-system.spec.ts
@@ -343,7 +363,7 @@ jobs:
             github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
             inputs.mode == 'candidate' && needs.ci-summary.result == 'success'
         runs-on: ubuntu-latest
-        environment: ${{ inputs.execution_environment || 'production' }}
+        environment: ${{ inputs.execution_environment == 'preview' && 'Preview' || 'production' }}
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
@@ -379,7 +399,7 @@ jobs:
             inputs.mode != 'selected-artifact' && needs.ci-summary.result == 'success' &&
             (inputs.mode != 'candidate' || needs.candidate-preflight.result == 'success')
         runs-on: ubuntu-latest
-        environment: ${{ inputs.mode == 'candidate' && (inputs.execution_environment || 'production') || 'production' }}
+        environment: ${{ inputs.mode == 'candidate' && inputs.execution_environment == 'preview' && 'Preview' || 'production' }}
         outputs:
             artifact-digest: ${{ steps.digest.outputs.artifact-digest }}
             archive-digest: ${{ steps.archive-roundtrip.outputs.archive-digest }}
@@ -531,7 +551,7 @@ jobs:
             inputs.mode == 'candidate' && needs.ci-summary.result == 'success' &&
             needs.candidate-preflight.result == 'success'
         runs-on: ubuntu-latest
-        environment: ${{ inputs.execution_environment || 'production' }}
+        environment: ${{ inputs.execution_environment == 'preview' && 'Preview' || 'production' }}
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
@@ -727,7 +747,7 @@ jobs:
             artifact-id: ${{ steps.register.outputs.artifact-id }}
             artifact-digest: ${{ steps.register.outputs.artifact-digest }}
         runs-on: ubuntu-latest
-        environment: ${{ inputs.execution_environment || 'production' }}
+        environment: ${{ inputs.execution_environment == 'preview' && 'Preview' || 'production' }}
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
@@ -807,7 +827,7 @@ jobs:
             always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
             inputs.mode == 'candidate' && needs.candidate-preflight.result == 'success'
         runs-on: ubuntu-latest
-        environment: ${{ inputs.execution_environment || 'production' }}
+        environment: ${{ inputs.execution_environment == 'preview' && 'Preview' || 'production' }}
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6

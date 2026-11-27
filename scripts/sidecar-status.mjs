@@ -36,6 +36,7 @@ const root = roots.find((candidate) =>
 );
 const args = process.argv.slice(2);
 
+/** @param {string} message @returns {never} */
 function fail(message) {
 	if (args.includes("--json")) {
 		console.log(

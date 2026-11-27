@@ -132,7 +132,7 @@ GitHub repository 的 `production` environment 需要配置以下 secrets/variab
 - `VERCEL_ORG_ID`（variable）：Vercel org 或 team 标识；它是项目定位信息，不承担身份验证。
 - `VERCEL_PROJECT_ID`（variable）：Vercel project 标识；它是项目定位信息，不承担身份验证。
 
-若要启用 Preview Candidate，另需建立独立的 GitHub `preview` environment，并配置以下项目专属值；Preview 不读取 production 值作为备用：
+若要启用 Preview Candidate，另需配置独立的 GitHub `Preview` environment，并配置以下项目专属值；Preview 不读取 production 值作为备用：
 
 - `DEPLOY_APPROVAL_API_BASE_URL`（variable）：必须精确为 `https://api-preview.whynotsnow.com`。
 - `SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID`（variable）与 `SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET`（secret）：Preview 专用 OAuth Client，只授予 `deployments:request`、`deployments:verify`。
