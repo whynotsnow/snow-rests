@@ -1,0 +1,141 @@
+name: Validate Backfill Artifact Fixture
+
+on:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    actions: read
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.run_id }}
+    cancel-in-progress: false
+
+jobs:
+    validate-ref:
+        name: Require main ref
+        runs-on: ubuntu-latest
+        steps:
+            - name: Require main branch
+              run: test "$GITHUB_REF" = "refs/heads/main"
+
+    fixture:
+        name: Create controlled Vercel artifact fixture
+        needs: validate-ref
+        runs-on: ubuntu-latest
+        outputs:
+            source-digest: ${{ steps.archive.outputs.source-digest }}
+            github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v6
+            - name: Set up Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Create minimal Vercel output fixture
+              run: |
+                  mkdir -p .vercel/output/static .canonical
+                  printf '%s\n' '{"version":1,"routes":[]}' > .vercel/output/config.json
+                  printf '%s\n' '<!doctype html><title>Backfill validation fixture</title>' > .vercel/output/static/index.html
+            - name: Create fixture source digest
+              id: archive
+              run: node scripts/create-vercel-archive.mjs .vercel/output .canonical/vercel-output.tar.gz .canonical/vercel-output-metadata.json
+            - name: Upload short-lived fixture artifact
+              id: upload
+              uses: actions/upload-artifact@v4
+              with:
+                  name: backfill-validation-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: .vercel/output
+                  include-hidden-files: true
+                  if-no-files-found: error
+                  compression-level: 0
+                  retention-days: 1
+
+    prepare-slot:
+        name: Validate exact fixture slot identity
+        needs: fixture
+        runs-on: ubuntu-latest
+        outputs:
+            matrix: ${{ steps.slots.outputs.matrix }}
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v6
+            - name: Set up Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Validate exact run, commit, and artifact identity
+              id: slots
+              env:
+                  BACKFILL_1_ARTIFACT_ID: validation-fixture-${{ github.sha }}
+                  BACKFILL_1_ARTIFACT_DIGEST: ${{ needs.fixture.outputs.source-digest }}
+                  BACKFILL_1_RUN_ID: ${{ github.run_id }}
+                  BACKFILL_1_GITHUB_ARTIFACT_ID: ${{ needs.fixture.outputs.github-artifact-id }}
+              run: node scripts/prepare-artifact-backfill.mjs
+
+    verify-roundtrip:
+        name: Download, normalize, and verify canonical archive
+        needs:
+            - fixture
+            - prepare-slot
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            max-parallel: 1
+            matrix: ${{ fromJSON(needs.prepare-slot.outputs.matrix) }}
+        steps:
+            - name: Check out repository
+              uses: actions/checkout@v6
+            - name: Set up Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Assert the prepared identity belongs to this run
+              env:
+                  SLOT_ARTIFACT_ID: ${{ matrix.artifactId }}
+                  SLOT_RUN_ID: ${{ matrix.runId }}
+                  SLOT_GITHUB_ARTIFACT_ID: ${{ matrix.githubArtifactId }}
+              run: |
+                  test "$SLOT_ARTIFACT_ID" = "validation-fixture-$GITHUB_SHA"
+                  test "$SLOT_RUN_ID" = "$GITHUB_RUN_ID"
+                  test "$SLOT_GITHUB_ARTIFACT_ID" -gt 0
+            - name: Download exact fixture artifact from this run
+              uses: actions/download-artifact@v4
+              with:
+                  github-token: ${{ github.token }}
+                  repository: ${{ github.repository }}
+                  run-id: ${{ matrix.runId }}
+                  artifact-ids: ${{ matrix.githubArtifactId }}
+                  merge-multiple: true
+                  path: .artifact-download
+            - name: Normalize downloaded Vercel artifact
+              run: node scripts/normalize-vercel-artifact.mjs .artifact-download .vercel/output
+            - name: Recreate canonical archive from normalized output
+              id: archive
+              run: node scripts/create-vercel-archive.mjs .vercel/output .canonical/vercel-output.tar.gz .canonical/vercel-output-metadata.json
+            - name: Verify source digest and canonical archive digest
+              id: verify
+              env:
+                  EXPECTED_SOURCE_DIGEST: ${{ matrix.artifactDigest }}
+              run: node scripts/verify-vercel-archive.mjs .canonical .vercel/output "$EXPECTED_SOURCE_DIGEST"
+            - name: Record validation identity
+              env:
+                  SOURCE_SHA: ${{ github.sha }}
+                  CENTRAL_FIXTURE_ID: ${{ matrix.artifactId }}
+                  RUN_ID: ${{ matrix.runId }}
+                  GITHUB_ARTIFACT_ID: ${{ matrix.githubArtifactId }}
+                  SOURCE_DIGEST: ${{ matrix.artifactDigest }}
+                  ARCHIVE_DIGEST: ${{ steps.verify.outputs.archive-digest }}
+                  ARCHIVE_SIZE: ${{ steps.verify.outputs.archive-size }}
+              run: |
+                  {
+                    echo "## Backfill fixture validation"
+                    echo "- Commit SHA: $SOURCE_SHA"
+                    echo "- Fixture identity: $CENTRAL_FIXTURE_ID"
+                    echo "- Workflow run ID: $RUN_ID"
+                    echo "- GitHub artifact ID: $GITHUB_ARTIFACT_ID"
+                    echo "- Source digest: $SOURCE_DIGEST"
+                    echo "- Canonical archive digest: $ARCHIVE_DIGEST"
+                    echo "- Canonical archive size: $ARCHIVE_SIZE bytes"
+                  } >> "$GITHUB_STEP_SUMMARY"

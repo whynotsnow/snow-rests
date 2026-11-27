@@ -258,6 +258,12 @@ legacy artifact、normalize `.vercel/output`、重建并复验 deterministic can
 consume approval 或执行 deploy；snow-base 只允许已有成功 deployment run 和 used approval 的同一
 artifact identity 进入该 purpose。
 
+`.github/workflows/validate-backfill-fixture.yml` 是独立的 validation-only 入口，只允许在 `main` 上手动运行。
+它生成最小同仓 Vercel output fixture，上传为 1 天有效的 GitHub Actions artifact，再使用同一 slot
+identity、下载、normalize、canonical archive 和 digest 校验脚本验证往返。该 workflow 仅使用 GitHub-hosted
+runner 和 `GITHUB_TOKEN` 的 artifact 读取权限，不挂 GitHub Environment、不调用 Snow Base API、不写中央 R2；
+fixture 产生的临时 identity 不能作为真实 historical-backfill 的 artifact 或审批证据。
+
 大 ZIP 的 normalize、tar/gzip 和 SHA-256 工作必须留在 GitHub runner。不要恢复由 Cloudflare Free-plan
 Worker 下载 raw ZIP、转换 archive 或整包缓冲大 gzip 的路径，也不要依赖 Paid plan 的 `limits.cpu_ms`
 扩容来掩盖该边界。

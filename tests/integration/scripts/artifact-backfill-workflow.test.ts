@@ -9,6 +9,13 @@ const workflow = fs.readFileSync(
 	),
 	"utf8",
 );
+const fixtureWorkflow = fs.readFileSync(
+	path.resolve(
+		import.meta.dirname,
+		"../../../.github/workflows/validate-backfill-fixture.yml",
+	),
+	"utf8",
+);
 
 describe("historical artifact backfill workflow contract", () => {
 	it("is manual-only and accepts at most two explicit complete slots", () => {
@@ -57,5 +64,50 @@ describe("historical artifact backfill workflow contract", () => {
 		expect(workflow).not.toContain("consume-approval");
 		expect(workflow).not.toContain("vercel deploy");
 		expect(workflow).not.toContain("DEPLOY_APPROVAL_APPROVAL_ID");
+	});
+});
+
+describe("fixture-only backfill validation workflow contract", () => {
+	it("is manual-only and uses GitHub-hosted jobs", () => {
+		expect(fixtureWorkflow).toContain("    workflow_dispatch:");
+		expect(fixtureWorkflow).not.toMatch(
+			/^\s+(push|pull_request|schedule):/mu,
+		);
+		expect(fixtureWorkflow.match(/runs-on: ubuntu-latest/gu)).toHaveLength(
+			4,
+		);
+	});
+
+	it("validates the exact same-run artifact through canonical digest checks", () => {
+		expect(fixtureWorkflow).toContain(
+			"scripts/prepare-artifact-backfill.mjs",
+		);
+		expect(fixtureWorkflow).toContain("run-id: ${{ matrix.runId }}");
+		expect(fixtureWorkflow).toContain(
+			"artifact-ids: ${{ matrix.githubArtifactId }}",
+		);
+		expect(fixtureWorkflow).toContain(
+			"matrix: ${{ fromJSON(needs.prepare-slot.outputs.matrix) }}",
+		);
+		expect(fixtureWorkflow).toContain(
+			"node scripts/normalize-vercel-artifact.mjs .artifact-download .vercel/output",
+		);
+		expect(fixtureWorkflow).toContain(
+			"node scripts/create-vercel-archive.mjs .vercel/output .canonical/vercel-output.tar.gz .canonical/vercel-output-metadata.json",
+		);
+		expect(fixtureWorkflow).toContain(
+			'node scripts/verify-vercel-archive.mjs .canonical .vercel/output "$EXPECTED_SOURCE_DIGEST"',
+		);
+	});
+
+	it("does not configure production environments or external promotion writes", () => {
+		expect(fixtureWorkflow).not.toMatch(/^\s+environment:/mu);
+		expect(fixtureWorkflow).not.toContain(
+			"promote-deployment-artifact.mjs",
+		);
+		expect(fixtureWorkflow).not.toContain("DEPLOY_APPROVAL");
+		expect(fixtureWorkflow).not.toContain("VERCEL_TOKEN");
+		expect(fixtureWorkflow).not.toContain("api.whynotsnow.com");
+		expect(fixtureWorkflow).not.toContain("R2");
 	});
 });
