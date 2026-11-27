@@ -50,7 +50,7 @@ Only implement sidecar items with `status: ready` or `status: running`. Read the
 
 The status command emits the Sidecar Contract v3 snapshot with separate `rms`, `tasks`, and `boards` views. Only execution-phase tasks appear in `executable` and `blocked`; RM discussion and decision records remain within the `demand/discussing` phase until the RM is decided. It must return `ok: false` with a stable `error.code`, safe message, and relative-path details when the sidecar is missing, malformed, or not v3-valid. Sidecar resolution checks `BLOG_SIDECAR_PATH`, the normal `../blog.sidecar` sibling, then the main checkout sibling discovered from Git's common directory; resolved machine paths are never emitted.
 
-Do not copy credentials, tokens, cookies, private keys, raw logs, local absolute paths, private URLs, hostnames, Agent Workspace local profile IDs, or personal identity data into tracked sidecar files. Main-repo commits that directly execute sidecar items should include `Plan-Item: <id>`; related non-execution commits may use `Related-Plan: <id>`.
+Do not copy credentials, tokens, cookies, private keys, raw logs, local absolute paths, private URLs, hostnames, Agent Workspace local profile IDs, or personal identity data into tracked sidecar files. Main-repo commits that directly execute sidecar items should include `Sidecar-Task: <id>`; related non-execution commits may use `Sidecar-Related: <id>`.
 
 ## Skill Operator Boundary
 

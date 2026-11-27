@@ -104,7 +104,7 @@ Do not record a machine-specific Skill installation path in tracked files. Resol
 - Do not implement sidecar items unless their status is `ready` or `running`.
 - Keep planning, decisions, executable plans, sanitized run records, and handoffs in the sidecar; keep product source, deployable files, runtime configuration, and product documentation in this repository.
 - Do not copy credentials, tokens, cookies, private keys, raw logs, local absolute paths, private URLs, hostnames, Agent Workspace local profile IDs, or personal identity data into tracked sidecar files.
-- If a blog commit directly executes a sidecar item, include `Plan-Item: <id>` in the commit message. Use `Related-Plan: <id>` only when the relationship is useful but the commit does not execute the item.
+- If a blog commit directly executes a sidecar item, include `Sidecar-Task: <id>` in the commit message. Use `Sidecar-Related: <id>` only when the relationship is useful but the commit does not execute the item.
 - Do not make standalone sidecar commits for routine planning churn unless the maintainer explicitly asks to checkpoint planning state.
 
 ## Sound Cues

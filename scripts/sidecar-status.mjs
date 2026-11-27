@@ -58,7 +58,7 @@ const runtime = [root, ...defaults]
 	.map((directory) => resolve(directory, "tools/sidecar/status_sidecar.py"))
 	.find((candidate) => existsSync(candidate));
 if (!runtime)
-	fail("Install the Sidecar v3.1 tooling in the active adjacent repository.");
+	fail("Install the Sidecar v3.2 tooling in the active adjacent repository.");
 const child = spawnSync(
 	process.env.SIDECAR_PYTHON || "python3",
 	["-B", runtime, root, ...args],
