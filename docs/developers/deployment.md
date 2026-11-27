@@ -68,6 +68,8 @@ workflow dispatch 的 `mode` 有三种，手动 dispatch 默认选 `candidate`�
 - `selected-artifact`：由 snow-base Admin 传入已选 artifact 的 id、digest、GitHub run/name 和 request id。workflow 只下载并复算该 artifact，等待/消费对应审批，然后执行 Vercel prebuilt deploy；审批后不重新 build。
 - `legacy-break-glass`：保留的旧 bearer 手动发布路径。只有 owner 在 GitHub Actions 手动选择此 mode，并填写 `break_glass_reason` 后才会进入；仍要求 full validation、构建产物 handoff、digest 校验、`production` Environment gate 和 owner approval。
 
+`workflow_dispatch` 另有 `execution_environment`，旧 Admin 调用省略该字段时按 `production` 处理。只有 `candidate` 可以显式选择 `preview`；`selected-artifact` 或 `legacy-break-glass` 携带 Preview 会在验证计划阶段拒绝，不能回落到生产。Preview Candidate 的 build、artifact registration 和 start/completion callback 全程使用 GitHub `preview` Environment、独立 Preview API 和独立 Vercel project；生产 Candidate 保持 `production` Environment 与现有默认 API origin。Preview API origin 固定为 `https://api-preview.whynotsnow.com`，缺少任一隔离配置或 origin 不匹配时在外部写入前 fail closed。
+
 `candidate` 和 `selected-artifact` 是由控制面调用的内部 workflow mode，不是用户必须按顺序手工执行的两个发布步骤。一次 Admin deployment intent 会在控制面内部复用或创建 candidate、绑定 artifact、等待 owner approval，再 dispatch selected-artifact。两种 mode 都 fail closed 校验 `blog/site` 的 project/target、exact commit、GitHub artifact identity 和 digest；selected-artifact 会 checkout Admin 指定的 `commit_sha`，而不是当前 workflow 事件的默认 branch HEAD。blog workflow 不接受 API、D1、R2 或 Worker Version 输入，也不 dispatch `snow-base/api` workflow。
 
 candidate workflow 会在验证阶段回报 `in_progress`，在 artifact 登记后回报 `completed`；部署 workflow 会在 Vercel deploy 前由固定 SHA 的公开 deployment approval Action 回报 deployment run `in_progress`，部署完成后由 `scripts/report-deployment-run.mjs` 调用 `/api/v1/deployments/runs/update`，只接受响应中的精确 deployment run ID 并输出给后续 smoke。成功部署后使用该 ID 执行 `/` 和 `/robots.txt` 公开 smoke，再调用 `/api/v1/deployments/runs/:deploymentRunId/smoke` 写入 run-bound evidence；smoke 或 evidence 失败时 workflow 失败。除 deployment run ID 外，这些 contract preflight、artifact registration、Candidate callback 和 selected-artifact approval request/wait/consume 都由固定 SHA 的公开 deployment approval Action 承接。每次回报都传递 request id、project、target、commit、GitHub run URL，以及 candidate/deployment artifact 的精确 id 和 digest；不得使用 request id 或 GitHub workflow run id 推导 deploymentRunId。
@@ -129,6 +131,15 @@ GitHub repository 的 `production` environment 需要配置以下 secrets/variab
 - `VERCEL_TOKEN`（secret）：用于从 GitHub Actions 验证并发布当前 Vercel 项目。
 - `VERCEL_ORG_ID`（variable）：Vercel org 或 team 标识；它是项目定位信息，不承担身份验证。
 - `VERCEL_PROJECT_ID`（variable）：Vercel project 标识；它是项目定位信息，不承担身份验证。
+
+若要启用 Preview Candidate，另需建立独立的 GitHub `preview` environment，并配置以下项目专属值；Preview 不读取 production 值作为备用：
+
+- `DEPLOY_APPROVAL_API_BASE_URL`（variable）：必须精确为 `https://api-preview.whynotsnow.com`。
+- `SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID`（variable）与 `SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET`（secret）：Preview 专用 OAuth Client，只授予 `deployments:request`、`deployments:verify`。
+- `SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID`（variable）与 `SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET`（secret）：另一个 Preview 专用 OAuth Client，只授予 `deployments:run-update`；不得与 approval Client 相同。
+- `PREVIEW_VERCEL_ORG_ID`、`PREVIEW_VERCEL_PROJECT_ID`（variables）与 `PREVIEW_VERCEL_TOKEN`（secret）：限定 Preview 测试项目的独立 Vercel 定位和凭据。Preview 使用 `vercel pull --environment=preview` 与不带 `--prod` 的 `vercel build`。
+
+部署 Preview 前还需要 Snow Base 确认受控 Candidate-only dispatch 入口确实传递 `execution_environment=preview`，且 Preview API 注册表、GitHub App 与测试 Vercel 项目已配置完成。当前 workflow 的 fail-closed 门禁已实现；外部环境未配置时不得触发真实 Preview Candidate。
 
 `snow build CI` 的 selected-artifact job 会在请求/消费审批前预检 modern OAuth Client ID、Client Secret，以及 Vercel 项目定位 Variables 和 Token Secret 的存在和格式；legacy `DEPLOY_APPROVAL_TOKEN` 不在该 preflight 范围内。缺少任一 modern 项时，workflow 会失败并只输出缺失或格式无效的变量/secret 名称，不输出任何 Secret 值。OAuth 响应还必须验证精确 scope 和约 15 分钟 TTL；不符合时 fail closed。历史 artifact backfill workflow 固定以 `historical-backfill` mode 使用 `deployments:artifact-promote` OAuth scope；OAuth 配置缺失或请求失败会停止任务，不会回退 `DEPLOY_APPROVAL_TOKEN`。GitHub Actions artifact 和 candidate `expiresAt` 当前统一为 7 天；Admin 选择和 dispatch 必须在 candidate 过期前完成。
 

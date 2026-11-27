@@ -8,6 +8,13 @@ const workflow = fs.readFileSync(
 	path.resolve(import.meta.dirname, "../../../.github/workflows/CI.yml"),
 	"utf8",
 );
+const candidateEnvironmentValidator = fs.readFileSync(
+	path.resolve(
+		import.meta.dirname,
+		"../../../scripts/validate-candidate-environment.mjs",
+	),
+	"utf8",
+);
 const backfillWorkflow = fs.readFileSync(
 	path.resolve(
 		import.meta.dirname,
@@ -62,6 +69,55 @@ const artifactPromotion = fs.readFileSync(
 	),
 	"utf8",
 );
+
+describe("Candidate execution environment workflow contract", () => {
+	it("defaults existing Admin calls to production and allows explicit Preview only for Candidate", () => {
+		expect(workflow).toContain("execution_environment:");
+		expect(workflow).toContain("default: production");
+		expect(workflow).toContain(
+			"node scripts/validate-candidate-environment.mjs --inputs-only",
+		);
+		expect(workflow).toContain(
+			"environment: ${{ inputs.execution_environment || 'production' }}",
+		);
+		expect(workflow).toContain(
+			"needs.candidate-preflight.result == 'success'",
+		);
+		expect(workflow).toContain("inputs.mode == 'candidate'");
+		expect(candidateEnvironmentValidator).toContain(
+			"Preview execution is allowed only for Candidate mode.",
+		);
+	});
+
+	it("uses a distinct allowlisted Preview API and Vercel environment without production fallback", () => {
+		const candidateBuild = jobSection(
+			"build-vercel-artifact",
+			"report-site-candidate-start",
+		);
+		const candidateJobs = workflow.slice(
+			workflow.indexOf("    report-site-candidate-start:"),
+			workflow.indexOf("    deploy-production:"),
+		);
+		expect(candidateBuild).toContain("vars.PREVIEW_VERCEL_ORG_ID");
+		expect(candidateBuild).toContain("vars.PREVIEW_VERCEL_PROJECT_ID");
+		expect(candidateBuild).toContain("secrets.PREVIEW_VERCEL_TOKEN");
+		expect(candidateBuild).toContain("--environment=preview");
+		expect(candidateBuild).toContain("vercel@latest build --yes");
+		expect(candidateBuild).toContain(
+			'if [[ "${{ inputs.mode }}" == "candidate" && "${{ inputs.execution_environment }}" == "preview" ]]; then\n                    pnpm dlx vercel@latest build --yes --token "$VERCEL_TOKEN"',
+		);
+		expect(candidateJobs).toContain(
+			"inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL",
+		);
+		expect(candidateJobs).toContain(
+			"needs.candidate-preflight.result == 'success'",
+		);
+		expect(candidateEnvironmentValidator).toContain(
+			"apiBaseUrl || PRODUCTION_API_ORIGIN",
+		);
+		expect(candidateEnvironmentValidator).toContain("PREVIEW_API_ORIGIN");
+	});
+});
 
 function jobSection(jobName: string, nextJobName: string) {
 	const start = workflow.indexOf(`    ${jobName}:`);
@@ -281,7 +337,7 @@ describe("Vercel artifact workflow contract", () => {
 	it("defaults manual dispatch away from legacy and keeps backfill on OAuth Client Credentials", () => {
 		const modeInput = workflow.slice(
 			workflow.indexOf("            mode:"),
-			workflow.indexOf("            project_slug:"),
+			workflow.indexOf("            execution_environment:"),
 		);
 		const legacyJob = jobSection(
 			"deploy-production",
@@ -406,7 +462,7 @@ describe("Vercel artifact workflow contract", () => {
 		);
 		const deploymentSecretPreflight = selectedJob.slice(
 			selectedJob.indexOf(
-				"            - name: Validate deployment secrets",
+				"            - name: Validate production deployment configuration",
 			),
 			selectedJob.indexOf(
 				"            - name: Download selected GitHub artifact",

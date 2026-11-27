@@ -19,6 +19,14 @@ on:
                     - candidate
                     - selected-artifact
                     - legacy-break-glass
+            execution_environment:
+                description: Candidate execution environment; omitted legacy calls remain production
+                required: false
+                default: production
+                type: choice
+                options:
+                    - production
+                    - preview
             project_slug:
                 description: Deployment project slug
                 required: false
@@ -100,7 +108,13 @@ jobs:
                   BASE_SHA: ${{ github.event.pull_request.base.sha }}
                   BEFORE_SHA: ${{ github.event.before }}
                   EVENT_NAME: ${{ github.event_name }}
+                  GITHUB_EVENT_NAME: ${{ github.event_name }}
+                  WORKFLOW_MODE: ${{ inputs.mode }}
+                  EXECUTION_ENVIRONMENT: ${{ inputs.execution_environment }}
               run: |
+                  if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+                    node scripts/validate-candidate-environment.mjs --inputs-only
+                  fi
                   node scripts/test-impact.mjs --check-coverage
                   case "$EVENT_NAME" in
                     pull_request)
@@ -322,14 +336,50 @@ jobs:
                     exit 1
                   fi
 
-    build-vercel-artifact:
-        name: Build Vercel Artifact
+    candidate-preflight:
+        name: Candidate environment preflight
         needs: ci-summary
         if: >-
             github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-            inputs.mode != 'selected-artifact'
+            inputs.mode == 'candidate' && needs.ci-summary.result == 'success'
         runs-on: ubuntu-latest
-        environment: production
+        environment: ${{ inputs.execution_environment || 'production' }}
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v6
+            - name: Setup Node
+              uses: actions/setup-node@v6
+              with:
+                  node-version: lts/*
+            - name: Validate Candidate environment configuration
+              env:
+                  GITHUB_EVENT_NAME: ${{ github.event_name }}
+                  WORKFLOW_MODE: ${{ inputs.mode }}
+                  EXECUTION_ENVIRONMENT: ${{ inputs.execution_environment || 'production' }}
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL }}
+                  SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
+                  SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+                  PREVIEW_VERCEL_ORG_ID: ${{ vars.PREVIEW_VERCEL_ORG_ID }}
+                  PREVIEW_VERCEL_PROJECT_ID: ${{ vars.PREVIEW_VERCEL_PROJECT_ID }}
+                  PREVIEW_VERCEL_TOKEN: ${{ secrets.PREVIEW_VERCEL_TOKEN }}
+              run: node scripts/validate-candidate-environment.mjs
+
+    build-vercel-artifact:
+        name: Build Vercel Artifact
+        needs:
+            - ci-summary
+            - candidate-preflight
+        if: >-
+            always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+            inputs.mode != 'selected-artifact' && needs.ci-summary.result == 'success' &&
+            (inputs.mode != 'candidate' || needs.candidate-preflight.result == 'success')
+        runs-on: ubuntu-latest
+        environment: ${{ inputs.mode == 'candidate' && (inputs.execution_environment || 'production') || 'production' }}
         outputs:
             artifact-digest: ${{ steps.digest.outputs.artifact-digest }}
             archive-digest: ${{ steps.archive-roundtrip.outputs.archive-digest }}
@@ -369,41 +419,52 @@ jobs:
 
             - name: Validate Vercel configuration
               env:
-                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+                  VERCEL_ORG_ID: ${{ inputs.execution_environment == 'preview' && vars.PREVIEW_VERCEL_ORG_ID || (inputs.execution_environment != 'preview' && vars.VERCEL_ORG_ID) }}
+                  VERCEL_PROJECT_ID: ${{ inputs.execution_environment == 'preview' && vars.PREVIEW_VERCEL_PROJECT_ID || (inputs.execution_environment != 'preview' && vars.VERCEL_PROJECT_ID) }}
+                  VERCEL_TOKEN: ${{ inputs.execution_environment == 'preview' && secrets.PREVIEW_VERCEL_TOKEN || (inputs.execution_environment != 'preview' && secrets.VERCEL_TOKEN) }}
+                  VERCEL_CONFIG_ENVIRONMENT: ${{ inputs.execution_environment || 'production' }}
               run: |
                   missing=0
                   for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
                     if [ -z "${!name}" ]; then
-                      echo "Missing required production environment variable: $name"
+                      echo "Missing required $VERCEL_CONFIG_ENVIRONMENT environment variable: $name"
                       missing=1
                     fi
                   done
                   if [ -z "$VERCEL_TOKEN" ]; then
-                    echo "Missing required production environment secret: VERCEL_TOKEN"
+                    echo "Missing required $VERCEL_CONFIG_ENVIRONMENT environment secret: VERCEL_TOKEN"
                     missing=1
                   fi
                   if [ "$missing" -ne 0 ]; then
                     exit 1
                   fi
 
-            - name: Pull Vercel production settings
+            - name: Pull Vercel environment settings
               env:
-                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-              run: pnpm dlx vercel@latest pull --yes --environment=production --token "$VERCEL_TOKEN"
+                  VERCEL_ORG_ID: ${{ inputs.execution_environment == 'preview' && vars.PREVIEW_VERCEL_ORG_ID || (inputs.execution_environment != 'preview' && vars.VERCEL_ORG_ID) }}
+                  VERCEL_PROJECT_ID: ${{ inputs.execution_environment == 'preview' && vars.PREVIEW_VERCEL_PROJECT_ID || (inputs.execution_environment != 'preview' && vars.VERCEL_PROJECT_ID) }}
+                  VERCEL_TOKEN: ${{ inputs.execution_environment == 'preview' && secrets.PREVIEW_VERCEL_TOKEN || (inputs.execution_environment != 'preview' && secrets.VERCEL_TOKEN) }}
+              run: |
+                  if [[ "${{ inputs.mode }}" == "candidate" && "${{ inputs.execution_environment }}" == "preview" ]]; then
+                    pnpm dlx vercel@latest pull --yes --environment=preview --token "$VERCEL_TOKEN"
+                  else
+                    pnpm dlx vercel@latest pull --yes --environment=production --token "$VERCEL_TOKEN"
+                  fi
 
             - name: Install Playwright Chromium
               run: pnpm exec playwright install --with-deps chromium
 
             - name: Build Vercel output
               env:
-                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-                  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-              run: pnpm dlx vercel@latest build --prod --yes --token "$VERCEL_TOKEN"
+                  VERCEL_ORG_ID: ${{ inputs.execution_environment == 'preview' && vars.PREVIEW_VERCEL_ORG_ID || (inputs.execution_environment != 'preview' && vars.VERCEL_ORG_ID) }}
+                  VERCEL_PROJECT_ID: ${{ inputs.execution_environment == 'preview' && vars.PREVIEW_VERCEL_PROJECT_ID || (inputs.execution_environment != 'preview' && vars.VERCEL_PROJECT_ID) }}
+                  VERCEL_TOKEN: ${{ inputs.execution_environment == 'preview' && secrets.PREVIEW_VERCEL_TOKEN || (inputs.execution_environment != 'preview' && secrets.VERCEL_TOKEN) }}
+              run: |
+                  if [[ "${{ inputs.mode }}" == "candidate" && "${{ inputs.execution_environment }}" == "preview" ]]; then
+                    pnpm dlx vercel@latest build --yes --token "$VERCEL_TOKEN"
+                  else
+                    pnpm dlx vercel@latest build --prod --yes --token "$VERCEL_TOKEN"
+                  fi
 
             - name: Create canonical Vercel archive
               id: archive
@@ -462,12 +523,15 @@ jobs:
 
     report-site-candidate-start:
         name: Report blog/site Candidate start
-        needs: ci-summary
+        needs:
+            - ci-summary
+            - candidate-preflight
         if: >-
             always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-            inputs.mode == 'candidate' && needs.ci-summary.result == 'success'
+            inputs.mode == 'candidate' && needs.ci-summary.result == 'success' &&
+            needs.candidate-preflight.result == 'success'
         runs-on: ubuntu-latest
-        environment: production
+        environment: ${{ inputs.execution_environment || 'production' }}
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
@@ -488,7 +552,7 @@ jobs:
                   test "$REQUESTED_COMMIT_SHA" = "$GITHUB_COMMIT_SHA"
             - name: Request OAuth token for candidate contract
               env:
-                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
                   DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
                   DEPLOYMENT_OAUTH_SCOPES: deployments:request,deployments:verify
@@ -498,12 +562,12 @@ jobs:
               with:
                   operation: contract
                   token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
-                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  api-base-url: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   project-slug: ${{ inputs.project_slug }}
                   target: ${{ inputs.target }}
             - name: Request OAuth token for Candidate callback
               env:
-                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
                   DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
                   DEPLOYMENT_OAUTH_SCOPES: deployments:run-update
@@ -513,7 +577,7 @@ jobs:
               with:
                   operation: candidate-callback
                   token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
-                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  api-base-url: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   project-slug: ${{ inputs.project_slug }}
                   target: ${{ inputs.target }}
                   commit-sha: ${{ inputs.commit_sha || github.sha }}
@@ -652,15 +716,18 @@ jobs:
         name: Register blog/site Candidate
         needs:
             - ci-summary
+            - candidate-preflight
             - build-vercel-artifact
         if: >-
+            always() &&
             github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-            inputs.mode == 'candidate'
+            inputs.mode == 'candidate' && needs.ci-summary.result == 'success' &&
+            needs.candidate-preflight.result == 'success' && needs.build-vercel-artifact.result == 'success'
         outputs:
             artifact-id: ${{ steps.register.outputs.artifact-id }}
             artifact-digest: ${{ steps.register.outputs.artifact-digest }}
         runs-on: ubuntu-latest
-        environment: production
+        environment: ${{ inputs.execution_environment || 'production' }}
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
@@ -700,7 +767,7 @@ jobs:
               run: echo "expires-at=$(date -u -d '+7 days' '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
             - name: Request OAuth token for Candidate registration
               env:
-                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_ID }}
                   DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
                   DEPLOYMENT_OAUTH_SCOPES: deployments:request
@@ -711,7 +778,7 @@ jobs:
               with:
                   operation: register-artifact
                   token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
-                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  api-base-url: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   project-slug: blog
                   target: site
                   commit-sha: ${{ inputs.commit_sha || github.sha }}
@@ -732,14 +799,15 @@ jobs:
         name: Report blog/site Candidate completion
         needs:
             - ci-summary
+            - candidate-preflight
             - report-site-candidate-start
             - build-vercel-artifact
             - register-site-candidate
         if: >-
             always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-            inputs.mode == 'candidate'
+            inputs.mode == 'candidate' && needs.candidate-preflight.result == 'success'
         runs-on: ubuntu-latest
-        environment: production
+        environment: ${{ inputs.execution_environment || 'production' }}
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
@@ -749,7 +817,7 @@ jobs:
                   node-version: lts/*
             - name: Request OAuth token for Candidate callback
               env:
-                  DEPLOY_APPROVAL_API_BASE_URL: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  DEPLOY_APPROVAL_API_BASE_URL: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   DEPLOYMENT_OAUTH_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
                   DEPLOYMENT_OAUTH_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
                   DEPLOYMENT_OAUTH_SCOPES: deployments:run-update
@@ -759,7 +827,7 @@ jobs:
               with:
                   operation: candidate-callback
                   token: ${{ env.DEPLOYMENT_SERVICE_TOKEN }}
-                  api-base-url: ${{ vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com' }}
+                  api-base-url: ${{ inputs.execution_environment == 'preview' && vars.DEPLOY_APPROVAL_API_BASE_URL || (inputs.execution_environment != 'preview' && (vars.DEPLOY_APPROVAL_API_BASE_URL || 'https://api.whynotsnow.com')) }}
                   project-slug: ${{ inputs.project_slug }}
                   target: ${{ inputs.target }}
                   commit-sha: ${{ inputs.commit_sha || github.sha }}
@@ -1022,7 +1090,7 @@ jobs:
             - deploy-selected-artifact
         if: >-
             always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
-            inputs.mode == 'selected-artifact'
+            inputs.mode == 'selected-artifact' && inputs.execution_environment != 'preview'
         runs-on: ubuntu-latest
         environment: production
         steps:
