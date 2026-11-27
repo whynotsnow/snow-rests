@@ -208,7 +208,7 @@ Repository Dispatch 或手动 workflow 可以负责第 3 步，但事件负载�
 
 Vercel、Netlify 和 Cloudflare Pages 均使用：
 
-- Install Command：`pnpm install --frozen-lockfile && pnpm exec playwright install chromium`（Mermaid 预渲染需要与锁定 Playwright 版本匹配的 Chromium）
+- Vercel Install Command：`pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium`（Mermaid 预渲染需要锁定版本 Chromium 及其系统依赖；与 GitHub CI 保持一致）
 - Build Command：`pnpm build`
 - Output Directory：`dist`
 - Node.js：项目支持的 LTS 版本

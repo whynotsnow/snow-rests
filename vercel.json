@@ -1,7 +1,7 @@
 {
 	"buildCommand": "pnpm build",
 	"outputDirectory": "dist",
-	"installCommand": "pnpm install --frozen-lockfile && pnpm exec playwright install chromium",
+	"installCommand": "pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium",
 	"framework": "astro",
 	"ignoreCommand": "node scripts/vercel-ignore-build.mjs",
 	"headers": [
