@@ -208,7 +208,7 @@ Repository Dispatch 或手动 workflow 可以负责第 3 步，但事件负载�
 
 Vercel、Netlify 和 Cloudflare Pages 均使用：
 
-- Vercel Install Command：`pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium`（Mermaid 预渲染需要锁定版本 Chromium 及其系统依赖；与 GitHub CI 保持一致）
+- Vercel Install Command 先按 `pnpm-lock.yaml` 安装依赖，再运行 `scripts/install-playwright-browser.mjs` 安装锁定 Playwright 版本的 Chromium。该脚本只在 Vercel 使用的 Amazon Linux 2023 上通过 `dnf install -y nspr nss` 安装 Chromium 缺少的系统库；Ubuntu GitHub Actions 的 Vercel artifact job 已先运行 `playwright install --with-deps chromium`，无需再次调用 dnf 或 apt。Mermaid 预渲染需要浏览器和系统库，不能只安装浏览器二进制。
 - Build Command：`pnpm build`
 - Output Directory：`dist`
 - Node.js：项目支持的 LTS 版本
