@@ -10,14 +10,14 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 function locateSidecarRoot() {
 	const candidates = [];
-	const explicitPath = process.env.BLOG_SIDECAR_PATH?.trim();
+	const explicitPath = process.env.SNOW_RESTS_SIDECAR_PATH?.trim();
 	if (explicitPath)
 		candidates.push(
 			isAbsolute(explicitPath)
 				? explicitPath
 				: resolve(repoRoot, explicitPath),
 		);
-	candidates.push(resolve(repoRoot, "..", "blog.sidecar"));
+	candidates.push(resolve(repoRoot, "..", "snow-rests.sidecar"));
 	const result = spawnSync("git", ["rev-parse", "--git-common-dir"], {
 		cwd: repoRoot,
 		encoding: "utf8",
@@ -27,7 +27,9 @@ function locateSidecarRoot() {
 		const commonDir = isAbsolute(commonDirValue)
 			? commonDirValue
 			: resolve(repoRoot, commonDirValue);
-		candidates.push(resolve(dirname(commonDir), "..", "blog.sidecar"));
+		candidates.push(
+			resolve(dirname(commonDir), "..", "snow-rests.sidecar"),
+		);
 	}
 	return candidates
 		.filter((candidate, index) => candidates.indexOf(candidate) === index)
@@ -37,7 +39,7 @@ function locateSidecarRoot() {
 }
 
 const sidecarRoot =
-	locateSidecarRoot() ?? resolve(repoRoot, "..", "blog.sidecar");
+	locateSidecarRoot() ?? resolve(repoRoot, "..", "snow-rests.sidecar");
 const sidecarRootDisplay = relative(repoRoot, sidecarRoot) || ".";
 const sidecarPackage = resolve(sidecarRoot, "package.json");
 const sidecarServer = resolve(sidecarRoot, "server.mjs");
@@ -121,7 +123,7 @@ if (shouldPrintOnly) {
 	process.exit(0);
 }
 
-console.log(`Starting blog sidecar preview on ${previewUrl}`);
+console.log(`Starting Snow Rests sidecar preview on ${previewUrl}`);
 console.log("Use PORT=<port> pnpm sidecar to choose another port.");
 
 const child = spawn(process.execPath, [sidecarServer], {

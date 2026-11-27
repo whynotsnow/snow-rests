@@ -72,7 +72,7 @@ All AI-assisted development in this project should be memory-driven, pattern-awa
 - `pnpm format`: format the repository according to the local Prettier config.
 - `pnpm precommit`: run the same pre-commit gate as the Git hook.
 - `pnpm test:plan`: print the local-mode validation selected for current changes without executing it; full-regression needs are reported as risks, not executed.
-- `pnpm sidecar:status`: print the adjacent sidecar RM/task status from `../blog.sidecar`.
+- `pnpm sidecar:status`: print the adjacent sidecar RM/task status from `../snow-rests.sidecar`.
 - `pnpm test:affected`: execute the local-mode validation selected by `tests/impact-map.json`.
 - `pnpm test:plan:ci`: print the CI-mode validation plan where high-risk or unclassified paths can select `verify:full`.
 - `pnpm test:affected:ci`: execute the CI-mode validation plan.
@@ -99,7 +99,7 @@ Do not record a machine-specific Skill installation path in tracked files. Resol
 
 ## Planning Sidecar
 
-- The adjacent planning sidecar is `../blog.sidecar`.
+- The adjacent planning sidecar is `../snow-rests.sidecar`.
 - Use `pnpm --silent sidecar:status --json` from this repository to discover sidecar items before selecting plan-backed work.
 - Do not implement sidecar items unless their status is `ready` or `running`.
 - Keep planning, decisions, executable plans, sanitized run records, and handoffs in the sidecar; keep product source, deployable files, runtime configuration, and product documentation in this repository.
