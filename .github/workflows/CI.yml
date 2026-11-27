@@ -367,27 +367,31 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
-            - name: Validate build secrets
+            - name: Validate Vercel configuration
               env:
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
               run: |
                   missing=0
-                  for name in VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_TOKEN; do
+                  for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
                     if [ -z "${!name}" ]; then
-                      echo "Missing required production environment secret: $name"
+                      echo "Missing required production environment variable: $name"
                       missing=1
                     fi
                   done
+                  if [ -z "$VERCEL_TOKEN" ]; then
+                    echo "Missing required production environment secret: VERCEL_TOKEN"
+                    missing=1
+                  fi
                   if [ "$missing" -ne 0 ]; then
                     exit 1
                   fi
 
             - name: Pull Vercel production settings
               env:
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
               run: pnpm dlx vercel@latest pull --yes --environment=production --token "$VERCEL_TOKEN"
 
@@ -396,8 +400,8 @@ jobs:
 
             - name: Build Vercel output
               env:
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
               run: pnpm dlx vercel@latest build --prod --yes --token "$VERCEL_TOKEN"
 
@@ -566,19 +570,25 @@ jobs:
                   corepack enable
                   corepack prepare pnpm@10.22.0 --activate
 
-            - name: Validate deployment secrets
+            - name: Validate legacy deployment credentials
               env:
                   DEPLOY_APPROVAL_TOKEN: ${{ secrets.DEPLOY_APPROVAL_TOKEN }}
                   SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
                   SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
               run: |
                   missing=0
-                  for name in DEPLOY_APPROVAL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_TOKEN; do
+                  for name in DEPLOY_APPROVAL_TOKEN VERCEL_TOKEN; do
                     if [ -z "${!name}" ]; then
                       echo "Missing required production environment secret: $name"
+                      missing=1
+                    fi
+                  done
+                  for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+                    if [ -z "${!name}" ]; then
+                      echo "Missing required production environment variable: $name"
                       missing=1
                     fi
                   done
@@ -633,8 +643,8 @@ jobs:
 
             - name: Deploy Vercel production
               env:
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
               run: pnpm dlx vercel@latest deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
 
@@ -822,7 +832,7 @@ jobs:
               run: |
                   corepack enable
                   corepack prepare pnpm@10.22.0 --activate
-            - name: Validate deployment secrets
+            - name: Validate production deployment configuration
               env:
                   SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID }}
                   SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_RUN_CLIENT_SECRET }}
@@ -830,8 +840,8 @@ jobs:
                   SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_APPROVAL_CLIENT_SECRET }}
                   SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID: ${{ vars.SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_ID }}
                   SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_SECRET: ${{ secrets.SNOW_BASE_DEPLOYMENT_PROMOTION_CLIENT_SECRET }}
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
               run: |
                   if [ -z "$SNOW_BASE_DEPLOYMENT_RUN_CLIENT_ID" ]; then
@@ -877,11 +887,11 @@ jobs:
                     exit 1
                   fi
                   if [ -z "$VERCEL_ORG_ID" ]; then
-                    echo "Missing required production environment secret: VERCEL_ORG_ID"
+                    echo "Missing required production environment variable: VERCEL_ORG_ID"
                     exit 1
                   fi
                   if [ -z "$VERCEL_PROJECT_ID" ]; then
-                    echo "Missing required production environment secret: VERCEL_PROJECT_ID"
+                    echo "Missing required production environment variable: VERCEL_PROJECT_ID"
                     exit 1
                   fi
                   if [ -z "$VERCEL_TOKEN" ]; then
@@ -1000,8 +1010,8 @@ jobs:
             - name: Deploy Vercel production
               id: deploy-vercel
               env:
-                  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-                  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+                  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+                  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
                   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
               run: pnpm dlx vercel@latest deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
 
